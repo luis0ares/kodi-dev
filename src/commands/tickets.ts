@@ -47,10 +47,11 @@ export function registerTicketsCommand(program: Command) {
     .option('--adr <ref>', 'ADR driver (repeatable)', collect, [])
     .option('--security <ref>', 'security driver')
     .option('--notes <text>')
+    .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (o) => {
       const draft = draftFromOptions(o);
-      const created = await resolveProvider().create(draft);
+      const created = await resolveProvider(process.cwd(), { yes: o.yes }).create(draft);
       out(created, o.json, () => `Created ${created.key} (${created.status}) — ${created.title}`);
     });
 
@@ -100,6 +101,7 @@ export function registerTicketsCommand(program: Command) {
   tickets
     .command('set-status <key> <status>')
     .description(`Transition a ticket (${TICKET_STATUSES.join(' | ')})`)
+    .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, status, o) => {
       if (!TICKET_STATUSES.includes(status as TicketStatus)) {
@@ -107,7 +109,7 @@ export function registerTicketsCommand(program: Command) {
         process.exitCode = 1;
         return;
       }
-      const t = await resolveProvider().setStatus(key, status as TicketStatus);
+      const t = await resolveProvider(process.cwd(), { yes: o.yes }).setStatus(key, status as TicketStatus);
       out(t, o.json, () => `${t.key} → ${t.status}`);
     });
 
@@ -115,18 +117,20 @@ export function registerTicketsCommand(program: Command) {
     .command('start <key>')
     .description('Mark a ticket started (In progress)')
     .option('--branch <name>')
+    .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
-      const t = await resolveProvider().start(key, { branch: o.branch });
+      const t = await resolveProvider(process.cwd(), { yes: o.yes }).start(key, { branch: o.branch });
       out(t, o.json, () => `${t.key} → ${t.status}`);
     });
 
   tickets
     .command('delete <key>')
     .description('Delete a ticket')
+    .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
-      await resolveProvider().delete(key);
+      await resolveProvider(process.cwd(), { yes: o.yes }).delete(key);
       out({ deleted: key }, o.json, () => `Deleted ${key}`);
     });
 
