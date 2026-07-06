@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { registerAddCommand } from './commands/add.js';
 import { registerHookCommand } from './commands/hook.js';
 import { registerInitCommand } from './commands/init.js';
 import { registerPrCommand } from './commands/pr.js';
@@ -15,14 +16,7 @@ registerTicketsCommand(program);
 registerPrCommand(program);
 registerHookCommand(program);
 registerInitCommand(program);
-
-program
-  .command('add')
-  .description('Install a skill-pack — F5')
-  .action(() => {
-    process.stderr.write('kodi add: not implemented yet (F5).\n');
-    process.exitCode = 1;
-  });
+registerAddCommand(program);
 
 program.parseAsync(process.argv).catch((err) => {
   process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
