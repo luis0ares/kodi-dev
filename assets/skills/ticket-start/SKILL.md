@@ -18,4 +18,11 @@ The build-orchestrator is the hub: engineers (`backend-engineer`,
 Critical/High security finding, and qa-implementation AND qa-visual are positive.
 Take the PR to `To Review` via `kodi pr` — never to `Done`.
 
-> Agents for this phase are authored in F5. This skeleton defines the flow only.
+## Flow
+
+1. **Resolve the ticket** — a given key, or recommend from `kodi tickets list-ready`.
+2. **Optional complement** — let the human add detail not in the ticket; if it
+   contradicts the ticket, reconcile first (the complement wins) and confirm.
+3. **Spawn `build-orchestrator`** with the ticket + complement; it owns the branch,
+   the security bracket, the slice→gate loop, and the hand-off.
+4. **Relay** its result (the sub-agent's output is not shown to the human directly).

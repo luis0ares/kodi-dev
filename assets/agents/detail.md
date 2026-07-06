@@ -56,7 +56,7 @@ UX, phases, and tickets all trace back to.
 - The PRD file under `docs/prd/`.
 - A return handoff: the file path, a one-paragraph scope summary, and the list of
   **open scope decisions** the orchestrator must get the human to sign off before
-  `architect`/`ux` proceed.
+  `architect`/`ux-lead` proceed.
 
 Never mark scope as final yourself — PRD approval is a human decision the
 orchestrator owns.
