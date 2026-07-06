@@ -1,8 +1,11 @@
 ---
 name: ticket-start
 description: >-
-  Build phase. Start one backlog ticket and drive it as a vertical slice. Use when
-  the user runs /ticket-start, says "start ticket X", or "begin the next slice".
+  Start ONE backlog ticket and drive it as a vertical slice via the
+  build-orchestrator. Use this whenever the user runs /ticket-start, or says things
+  like "start ticket KODI-014", "begin the next slice", "build this ticket",
+  "let's implement <ticket>", "pick up the next ready ticket", "kick off the build"
+  — anytime build work should begin on a ticket.
 ---
 
 # /ticket-start [ticket] — Build one vertical slice

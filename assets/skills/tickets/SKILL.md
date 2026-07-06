@@ -1,8 +1,11 @@
 ---
 name: tickets
 description: >-
-  Generate board tickets from the consolidated plan (per phase, on demand). Use
-  when the user runs /tickets or is ready to turn a planned phase into work items.
+  Generate board tickets from a consolidated plan, one phase at a time, via the
+  kodi tickets CLI. Use this whenever the user runs /tickets, or says things like
+  "create tickets/issues for this", "turn the plan into work items", "ticket up
+  phase 1", "put this on the board", "make the backlog for this phase" — anytime a
+  planned phase should become actionable tickets.
 ---
 
 # /tickets — Generate tickets from the plan

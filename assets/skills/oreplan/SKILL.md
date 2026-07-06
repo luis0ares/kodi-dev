@@ -1,8 +1,11 @@
 ---
 name: oreplan
 description: >-
-  Re-plan or expand ONE phase of the consolidated plan, given context passed with
-  the command. Use when the user runs /oreplan <phase> or a phase's premise changed.
+  Re-plan or expand ONE phase of the consolidated plan, given new context. Use this
+  whenever the user runs /oreplan, or says things like "redo phase 2", "expand this
+  phase", "the plan for phase X changed", "a decision changed, update that phase",
+  "rework the plan for <phase>" — anytime a single planned phase needs revising
+  without re-running the whole plan.
 ---
 
 # /oreplan <phase> [context] — Re-plan one phase

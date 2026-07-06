@@ -1,9 +1,12 @@
 ---
 name: oplan
 description: >-
-  Planning phase. Drive the hub-and-spoke planning loop to produce a consolidated,
-  phased plan in docs/plan. Use when the user runs /oplan or wants to plan a new
-  project/feature from briefing.md.
+  Run kodi's Planning phase — drive the hub-and-spoke manager/leaf loop (PRD →
+  architecture ∥ UX → phases → QA gate) into a consolidated, phased plan in
+  docs/plan. Use this whenever the user runs /oplan, or says things like "let's
+  plan this", "plan the project/feature", "turn the briefing into a plan", "design
+  the architecture and UX", "break the work into a roadmap" — anytime they move
+  from briefing toward a plan, even without the word "plan".
 ---
 
 # /oplan — Planning (main-loop orchestrator, hub-and-spoke)

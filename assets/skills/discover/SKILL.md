@@ -1,10 +1,13 @@
 ---
 name: discover
 description: >-
-  Run the Briefing phase: interview the human on the main thread, investigate with
-  the WU sub-agents (without them interviewing), and synthesize briefing.md + a thin
-  CLAUDE.md. Use when the user runs /discover, starts a new project, onboards kodi
-  onto an existing repo, or wants to (re)establish project context before planning.
+  Run kodi's Briefing phase — interview the human on the main thread, investigate
+  with the WU sub-agents, and produce briefing.md + a thin CLAUDE.md. Use this
+  whenever the user runs /discover, is starting a NEW project, onboarding kodi onto
+  an existing repo, or says things like "let's figure out what we're building",
+  "set up the project", "discover the requirements", "understand this codebase
+  before we plan" — anytime project context must be established BEFORE planning,
+  even if they never say the word "discover".
 ---
 
 # /discover — Briefing (you are the main-loop orchestrator)
