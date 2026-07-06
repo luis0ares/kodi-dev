@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { registerHookCommand } from './commands/hook.js';
 import { registerInitCommand } from './commands/init.js';
+import { registerPrCommand } from './commands/pr.js';
 import { registerTicketsCommand } from './commands/tickets.js';
 
 const program = new Command();
@@ -11,17 +12,9 @@ program
   .version('0.0.0');
 
 registerTicketsCommand(program);
+registerPrCommand(program);
 registerHookCommand(program);
 registerInitCommand(program);
-
-// --- Skeletons wired in later phases (F4/F5) -------------------------------
-program
-  .command('pr')
-  .description('Manage pull requests (proxy gh/az) — F5')
-  .action(() => {
-    process.stderr.write('kodi pr: not implemented yet (F5).\n');
-    process.exitCode = 1;
-  });
 
 program
   .command('add')
