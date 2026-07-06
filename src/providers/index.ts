@@ -1,4 +1,5 @@
 import { loadBoardConfig } from '../config.js';
+import { AzureTicketProvider } from './azure.js';
 import { GithubTicketProvider } from './github.js';
 import { LocalTicketProvider } from './local.js';
 import type { TicketProvider } from './types.js';
@@ -21,7 +22,12 @@ export function resolveProvider(cwd = process.cwd(), opts: ResolveOptions = {}):
     case 'github':
       return new GithubTicketProvider({ repo: cfg.repository, dryRun: !opts.yes, cwd });
     case 'azure':
-      throw new Error('provider "azure" is not implemented yet. Use local or github for now.');
+      return new AzureTicketProvider({
+        organization: cfg.organization,
+        project: cfg.project,
+        dryRun: !opts.yes,
+        cwd,
+      });
     default:
       return new LocalTicketProvider(cfg.prefix, cwd);
   }
