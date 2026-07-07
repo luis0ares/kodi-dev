@@ -5,6 +5,18 @@ export type Runner = (args: string[]) => string;
 
 const defaultRunner: Runner = (args) => execRead(args);
 
+/**
+ * Normalize an org input into the full URL `az` requires. Accepts a bare org
+ * name ("acme"), a host path ("dev.azure.com/org"), or a full URL.
+ */
+export function normalizeOrgUrl(input: string): string {
+  const s = input.trim().replace(/\/+$/, '');
+  if (!s) return '';
+  if (/^https?:\/\//i.test(s)) return s;
+  if (/\b(dev\.azure\.com|visualstudio\.com)\b/i.test(s)) return `https://${s.replace(/^\/+/, '')}`;
+  return `https://dev.azure.com/${s}`;
+}
+
 /** Parse `az devops project list -o json` into project names. */
 export function parseProjects(json: string): string[] {
   const data = JSON.parse(json);

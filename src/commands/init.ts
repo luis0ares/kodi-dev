@@ -16,6 +16,7 @@ import { DEFAULT_COLUMNS } from '../providers/azure.js';
 import {
   getProjectInfo,
   listProjects,
+  normalizeOrgUrl,
   processSupportsIssues,
   type Runner,
 } from '../providers/azure-discovery.js';
@@ -155,8 +156,9 @@ export async function configureBoard(prompter: Prompter, opts: WizardOptions = {
   }
 
   // Azure DevOps — tickets are always created as Issue work-items.
-  const org = opts.org ?? (await prompter.input('Azure DevOps organization URL (https://dev.azure.com/<org>)'));
-  if (!org) throw new InitAbort('missing: organization URL.');
+  const orgInput = opts.org ?? (await prompter.input('Azure DevOps organization (name or URL, e.g. acme)'));
+  const org = normalizeOrgUrl(orgInput);
+  if (!org) throw new InitAbort('missing: organization.');
 
   let projects: string[];
   try {

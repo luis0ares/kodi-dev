@@ -11,7 +11,7 @@ import {
   writeState,
 } from '../src/commands/init.js';
 import type { Prompter } from '../src/prompt.js';
-import type { Runner } from '../src/providers/azure-discovery.js';
+import { normalizeOrgUrl, type Runner } from '../src/providers/azure-discovery.js';
 
 const REPO_ASSETS = fileURLToPath(new URL('../assets/', import.meta.url));
 
@@ -72,6 +72,15 @@ describe('installHarness (files only)', () => {
     expect(existsSync(join(dir, 'docs/adr'))).toBe(true);
     // the board state file is NOT written by installHarness (the wizard writes it)
     expect(existsSync(join(dir, '.claude/kodi-dev.yaml'))).toBe(false);
+  });
+});
+
+describe('normalizeOrgUrl', () => {
+  it('expands a bare org name, a host path, and passes full URLs through', () => {
+    expect(normalizeOrgUrl('acme')).toBe('https://dev.azure.com/acme');
+    expect(normalizeOrgUrl('dev.azure.com/acme')).toBe('https://dev.azure.com/acme');
+    expect(normalizeOrgUrl('https://dev.azure.com/acme/')).toBe('https://dev.azure.com/acme');
+    expect(normalizeOrgUrl('  ')).toBe('');
   });
 });
 
