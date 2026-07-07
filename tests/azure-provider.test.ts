@@ -36,7 +36,7 @@ describe('azure provider — command construction', () => {
     expect(args.slice(0, 6)).toEqual(['az', 'boards', 'work-item', 'create', '--title', 'T']);
     expect(args).toContain('--type');
     expect(args).toContain('Issue');
-    expect(args).toContain('System.BoardColumn=To Do');
+    expect(args).toContain('System.State=To Do');
     expect(args).toContain('--organization');
     expect(args).toContain('https://dev.azure.com/acme');
     expect(args).toContain('Proj');
@@ -57,7 +57,7 @@ describe('azure provider — description round-trip', () => {
     const t = stored();
     const desc = descriptionHtml(t);
     const back = parseWorkItem(
-      { 'System.Description': desc, 'System.BoardColumn': 'In Progress' },
+      { 'System.Description': desc, 'System.State': 'In Progress' },
       7,
     );
     expect(back).not.toBeNull();

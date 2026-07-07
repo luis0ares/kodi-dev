@@ -13,13 +13,16 @@ import type { ReadyResult, StartProvenance, TicketProvider, TicketRef } from './
 
 /**
  * Azure DevOps Boards ticket provider. Tickets are ALWAYS created as Issue
- * work-items; the canonical ticket record rides in the HTML description as a
- * `<!-- kodi:ticket … -->` marker so it round-trips losslessly. Status maps to
- * System.BoardColumn via the column map discovered by `kodi init`. All `az`
- * calls are proxied here; mutations respect dry-run.
+ * work-items; the canonical ticket record rides base64-encoded inside a <pre> in
+ * the description (Azure strips HTML comments) so it round-trips losslessly.
+ * Status maps to System.State via the column map discovered by `kodi init` (for
+ * the Basic process, state names == board column names). All `az` calls are
+ * proxied here; mutations respect dry-run.
  */
 
-const MARKER_RE = /<!--\s*kodi:ticket\s+(\{[\s\S]*?\})\s*-->/;
+// Azure sanitizes rich-text descriptions and STRIPS HTML comments, so the
+// canonical record is stored base64-encoded inside a <pre> (which survives).
+const MARKER_RE = /kodi:ticket:([A-Za-z0-9+/=]+)/;
 
 /** Fallback column names when the state file has none yet. */
 export const DEFAULT_COLUMNS: ColumnMap = {
@@ -52,13 +55,13 @@ export function statusFromColumn(column: string, cols: ColumnMap): TicketStatus 
   return undefined;
 }
 
-/** Build the HTML description (human body + hidden canonical marker). */
+/** Build the HTML description (human body + base64 canonical marker in a <pre>). */
 export function descriptionHtml(t: StoredTicket): string {
-  const canonical = JSON.stringify({ ...t, key: undefined });
-  return `${mdToHtml(renderTicketMarkdown(t))}\n<!-- kodi:ticket ${canonical} -->`;
+  const canonical = Buffer.from(JSON.stringify({ ...t, key: undefined })).toString('base64');
+  return `${mdToHtml(renderTicketMarkdown(t))}\n<pre>kodi:ticket:${canonical}</pre>`;
 }
 
-/** Reconstruct a stored ticket from a work-item's id, column, and description. */
+/** Reconstruct a stored ticket from a work-item's id, state, and description. */
 export function parseWorkItem(
   fields: Record<string, any>,
   id: number,
@@ -67,9 +70,15 @@ export function parseWorkItem(
   const desc: string = fields['System.Description'] ?? '';
   const m = MARKER_RE.exec(desc);
   if (!m) return null;
-  const parsed = TicketSchema.safeParse(JSON.parse(m[1]));
+  let json: string;
+  try {
+    json = Buffer.from(m[1], 'base64').toString('utf-8');
+  } catch {
+    return null;
+  }
+  const parsed = TicketSchema.safeParse(JSON.parse(json));
   if (!parsed.success) return null;
-  const column: string = fields['System.BoardColumn'] ?? '';
+  const column: string = fields['System.State'] ?? fields['System.BoardColumn'] ?? '';
   const status = statusFromColumn(column, cols) ?? parsed.data.status;
   return { ...parsed.data, key: String(id), slug: parsed.data.slug ?? slugify(parsed.data.title), status };
 }
@@ -83,7 +92,7 @@ export function createArgs(
   const args = [
     'az', 'boards', 'work-item', 'create',
     '--title', title, '--type', 'Issue',
-    '--fields', `System.BoardColumn=${column}`, '--description', html,
+    '--fields', `System.State=${column}`, '--description', html,
     '--output', 'json',
   ];
   if (coords.organization) args.push('--organization', coords.organization);
@@ -110,8 +119,16 @@ export class AzureTicketProvider implements TicketProvider {
     return { organization: this.opts.organization, project: this.opts.project };
   }
 
+  // `az boards work-item show/update` accept ONLY --organization; `delete` and
+  // `query` also need --project. `az` flag support is inconsistent per subcommand.
   private orgArgs(): string[] {
     return this.opts.organization ? ['--organization', this.opts.organization] : [];
+  }
+
+  private scopeArgs(): string[] {
+    const a: string[] = [...this.orgArgs()];
+    if (this.opts.project) a.push('--project', this.opts.project);
+    return a;
   }
 
   async nextId(): Promise<string> {
@@ -140,7 +157,7 @@ export class AzureTicketProvider implements TicketProvider {
   async list(): Promise<TicketRef[]> {
     const wiql =
       'SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = \'Issue\' ORDER BY [System.Id]';
-    const out = execRead(['az', 'boards', 'query', '--wiql', wiql, '--output', 'json', ...this.orgArgs()]);
+    const out = execRead(['az', 'boards', 'query', '--wiql', wiql, '--output', 'json', ...this.scopeArgs()]);
     const rows: any[] = JSON.parse(out);
     const refs: TicketRef[] = [];
     for (const row of rows) {
@@ -170,7 +187,7 @@ export class AzureTicketProvider implements TicketProvider {
     const current = await this.get(key);
     if (!current) throw new Error(`work-item ${key} not found`);
     execMutate(
-      ['az', 'boards', 'work-item', 'update', '--id', key, '--fields', `System.BoardColumn=${columnForStatus(status, this.columns)}`, ...this.orgArgs()],
+      ['az', 'boards', 'work-item', 'update', '--id', key, '--fields', `System.State=${columnForStatus(status, this.columns)}`, ...this.orgArgs()],
       this.opts.dryRun,
     );
     return { ...current, status };
@@ -193,7 +210,7 @@ export class AzureTicketProvider implements TicketProvider {
   }
 
   async delete(key: string): Promise<void> {
-    execMutate(['az', 'boards', 'work-item', 'delete', '--id', key, '--yes', ...this.orgArgs()], this.opts.dryRun);
+    execMutate(['az', 'boards', 'work-item', 'delete', '--id', key, '--yes', ...this.scopeArgs()], this.opts.dryRun);
   }
 }
 
