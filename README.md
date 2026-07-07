@@ -65,8 +65,47 @@ kodi pr create --source feat/x --target main -t "Title" -s "Summary" --yes
 kodi add ./packs/fastapi-backend     # install a skill-pack
 ```
 
-Provider (`local` / `github` / `azure`) is read from `.claude/kodi/board.yaml`;
+Provider (`local` / `github` / `azure`) is read from `.claude/kodi-dev.yaml`;
 auth is inherited from your logged-in `gh`/`az`.
+
+## GitHub Projects setup
+
+The `github` provider stores tickets as **repo issues** and drives their status
+through a **Projects v2** board's single-select **Status** field (issues are added
+to the board as items). `kodi init` discovers the board and columns for you.
+
+**Prerequisites — do these once:**
+
+```bash
+gh auth login                       # authenticate the gh CLI
+gh auth refresh -s project --hostname github.com          # grant the Projects scope (NOT in default auth)
+```
+
+The board must be a **Projects v2** with a single-select **Status** field (every
+built-in board template has one).
+
+**What you supply; what kodi discovers:**
+
+| You provide | kodi discovers |
+| --- | --- |
+| whether the board is owned by an **org** or a **user** | the project **number** (pick from a list) |
+| the **owner login** (user-owned defaults to your login) | the Status field's **columns** (you map To Do / In Progress / To Review / Done) |
+| — | the **repository** (pick from the owner's repos; the current repo is offered first) |
+
+> GitHub's built-in board has only `Todo` / `In Progress` / `Done` — no "To Review".
+> You can map To Review onto another option, or add an "In Review" column to the board.
+
+**Interactive:** `kodi init --provider github` and answer the prompts.
+
+**Non-interactive:**
+
+```bash
+kodi init --provider github \
+  --owner-type org --project-owner acme --project-number 5 \
+  --repository acme/app \
+  --todo-column "Todo" --in-progress-column "In Progress" \
+  --to-review-column "In Review" --done-column "Done"
+```
 
 ## Develop
 

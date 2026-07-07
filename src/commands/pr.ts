@@ -1,17 +1,21 @@
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Command } from 'commander';
 import { loadBoardConfig } from '../config.js';
 import { execMutate, execRead } from '../exec.js';
-import { PrSchema, renderPrHtml, type Pr } from '../templates/pr.js';
+import { PrSchema, renderPrHtml, renderPrMarkdown, type Pr } from '../templates/pr.js';
 
-/** PRs are supported on Azure DevOps only for now (GitHub support deferred). */
-function requireAzure(): void {
+type Target = 'github' | 'azure';
+
+/** Resolve the PR backend from an explicit flag or the active provider (local has none). */
+function resolveTarget(explicit?: string): Target {
+  if (explicit === 'github' || explicit === 'azure') return explicit;
   const p = loadBoardConfig().provider;
-  if (p !== 'azure') {
-    throw new Error(
-      `kodi pr requires the azure provider (current: "${p}"). Configure it with \`kodi init\`.`,
-    );
-  }
+  if (p === 'github' || p === 'azure') return p;
+  throw new Error(
+    `no PR target: the active provider is "${p}". Configure github/azure with \`kodi init\`, or pass --provider.`,
+  );
 }
 
 function draftFromOptions(o: Record<string, unknown>): Pr {
@@ -29,6 +33,13 @@ function draftFromOptions(o: Record<string, unknown>): Pr {
   });
 }
 
+export function githubCreateArgs(pr: Pr, bodyFile: string, source: string, target: string, repo?: string): string[] {
+  const args = ['gh', 'pr', 'create', '--title', pr.title, '--body-file', bodyFile, '--base', target, '--head', source];
+  for (const r of pr.reviewers) args.push('--reviewer', r);
+  if (repo) args.push('--repo', repo);
+  return args;
+}
+
 export function azureCreateArgs(pr: Pr, html: string, source: string, target: string, repo?: string): string[] {
   const args = [
     'az', 'repos', 'pr', 'create', '--title', pr.title, '--description', html,
@@ -39,7 +50,7 @@ export function azureCreateArgs(pr: Pr, html: string, source: string, target: st
 }
 
 export function registerPrCommand(program: Command) {
-  const pr = program.command('pr').description('Manage pull requests (proxy az) with a validated template');
+  const pr = program.command('pr').description('Manage pull requests (proxy gh/az) with a validated template');
 
   pr
     .command('create')
@@ -56,13 +67,21 @@ export function registerPrCommand(program: Command) {
     .option('--notes <text>')
     .requiredOption('--source <branch>', 'branch the PR is opened from')
     .requiredOption('--target <branch>', 'branch the PR merges into')
-    .option('--repository <repo>', 'repository name')
+    .option('--provider <github|azure>', 'override the PR provider')
+    .option('--repository <repo>', 'repository (gh: OWNER/REPO; az: name)')
     .option('--yes', 'execute (default: dry-run)', false)
     .action((o) => {
-      requireAzure();
       const draft = draftFromOptions(o);
+      const target = resolveTarget(o.provider);
       const repo = o.repository ?? loadBoardConfig().repository;
-      const args = azureCreateArgs(draft, renderPrHtml(draft), o.source, o.target, repo);
+      let args: string[];
+      if (target === 'github') {
+        const bodyFile = join(mkdtempSync(join(tmpdir(), 'kodi-pr-')), 'body.md');
+        writeFileSync(bodyFile, renderPrMarkdown(draft), 'utf-8');
+        args = githubCreateArgs(draft, bodyFile, o.source, o.target, repo);
+      } else {
+        args = azureCreateArgs(draft, renderPrHtml(draft), o.source, o.target, repo);
+      }
       const res = execMutate(args, !o.yes);
       if (res.ran) process.stdout.write((res.stdout.trim() || 'PR created') + '\n');
     });
@@ -70,20 +89,32 @@ export function registerPrCommand(program: Command) {
   pr
     .command('list')
     .description('List open pull requests')
+    .option('--provider <github|azure>', 'override the PR provider')
     .option('--repository <repo>')
     .action((o) => {
-      requireAzure();
+      const target = resolveTarget(o.provider);
       const repo = o.repository ?? loadBoardConfig().repository;
-      process.stdout.write(execRead(['az', 'repos', 'pr', 'list', ...(repo ? ['--repository', repo] : [])]));
+      const args =
+        target === 'github'
+          ? ['gh', 'pr', 'list', ...(repo ? ['--repo', repo] : [])]
+          : ['az', 'repos', 'pr', 'list', ...(repo ? ['--repository', repo] : [])];
+      process.stdout.write(execRead(args));
     });
 
   pr
     .command('abandon <id>')
-    .description('Abandon a pull request')
+    .description('Abandon/close a pull request')
+    .option('--provider <github|azure>', 'override the PR provider')
+    .option('--repository <repo>')
     .option('--yes', 'execute (default: dry-run)', false)
     .action((id, o) => {
-      requireAzure();
-      execMutate(['az', 'repos', 'pr', 'update', '--id', id, '--status', 'abandoned'], !o.yes);
+      const target = resolveTarget(o.provider);
+      const repo = o.repository ?? loadBoardConfig().repository;
+      const args =
+        target === 'github'
+          ? ['gh', 'pr', 'close', id, ...(repo ? ['--repo', repo] : [])]
+          : ['az', 'repos', 'pr', 'update', '--id', id, '--status', 'abandoned'];
+      execMutate(args, !o.yes);
     });
 
   return pr;

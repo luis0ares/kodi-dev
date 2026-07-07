@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { azureCreateArgs } from '../src/commands/pr.js';
+import { azureCreateArgs, githubCreateArgs } from '../src/commands/pr.js';
 import { PrSchema, renderPrHtml, renderPrMarkdown } from '../src/templates/pr.js';
 
 function draft(over: Record<string, unknown> = {}) {
@@ -43,5 +43,17 @@ describe('pr command construction', () => {
     expect(args).toContain('--source-branch');
     expect(args).toContain('--target-branch');
     expect(args).toContain('--repository');
+  });
+
+  it('builds a github create command (markdown body-file, base/head, reviewers, repo)', () => {
+    const args = githubCreateArgs(draft({ reviewers: ['octocat'] }), '/tmp/body.md', 'feat/x', 'main', 'acme/app');
+    expect(args.slice(0, 5)).toEqual(['gh', 'pr', 'create', '--title', 'Add dataset import']);
+    expect(args).toContain('--body-file');
+    expect(args).toContain('/tmp/body.md');
+    expect(args.slice(-2)).toEqual(['--repo', 'acme/app']);
+    expect(args).toContain('--base');
+    expect(args).toContain('--head');
+    expect(args).toContain('--reviewer');
+    expect(args).toContain('octocat');
   });
 });
