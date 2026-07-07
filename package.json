@@ -2,6 +2,16 @@
   "name": "kodi",
   "version": "0.0.0",
   "description": "kodi.dev — Claude Code-native agent orchestrator CLI",
+  "license": "MIT",
+  "author": "Luis Soares",
+  "keywords": [
+    "claude-code",
+    "agents",
+    "orchestrator",
+    "cli",
+    "tickets",
+    "pull-request"
+  ],
   "type": "module",
   "bin": {
     "kodi": "dist/index.js"
@@ -18,7 +28,8 @@
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "tsup"
   },
   "dependencies": {
     "commander": "^12.1.0",
