@@ -3,11 +3,7 @@
 **kodi.dev** — a Claude Code-native agent orchestrator. It installs a thin harness
 into any project — a `SessionStart` bootstrap, phase skills, and a neutral team of
 sub-agents — plus a deterministic CLI that proxies your ticket board and pull
-requests. It runs **inside** a Claude Code session (host-driven); there is no
-separate engine and no `claude -p` process fleet.
-
-> Status: harness complete (F1–F5). End-to-end validation on a consumer project
-> (F6) and npm publish (F7) are pending.
+requests. It runs **inside** a Claude Code session (host-driven).
 
 ## Install
 
@@ -77,8 +73,8 @@ to the board as items). `kodi init` discovers the board and columns for you.
 **Prerequisites — do these once:**
 
 ```bash
-gh auth login                       # authenticate the gh CLI
-gh auth refresh -s project --hostname github.com          # grant the Projects scope (NOT in default auth)
+gh auth login                                     # authenticate the gh CLI
+gh auth refresh -s project --hostname github.com  # grant the Projects scope (NOT in default auth)
 ```
 
 The board must be a **Projects v2** with a single-select **Status** field (every
