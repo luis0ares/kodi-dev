@@ -182,7 +182,6 @@ export class LocalTicketProvider implements TicketProvider {
     const doc = load(this.paths.statusYaml);
     upsert(doc, { key, column: ticket.status, slug });
     save(this.paths.statusYaml, doc);
-    this.writeIndex();
     return ticket;
   }
 
@@ -222,7 +221,6 @@ export class LocalTicketProvider implements TicketProvider {
     upsert(doc, { key, column: status, slug: ticket.slug });
     save(this.paths.statusYaml, doc);
     if (oldPath !== newPath) unlinkSync(oldPath);
-    this.writeIndex();
     return ticket;
   }
 
@@ -247,7 +245,6 @@ export class LocalTicketProvider implements TicketProvider {
     const doc = load(this.paths.statusYaml);
     upsert(doc, { key, column, slug: ticket.slug });
     save(this.paths.statusYaml, doc);
-    this.writeIndex();
     return ticket;
   }
 
@@ -259,22 +256,6 @@ export class LocalTicketProvider implements TicketProvider {
     remove(doc, key);
     save(this.paths.statusYaml, doc);
     unlinkSync(found.path);
-    this.writeIndex();
-  }
-
-  /**
-   * Regenerate the human-readable `tickets.md` table from the index-driven
-   * enumeration. Kept coherent + non-crashing; its retirement is a separate
-   * downstream slice (ADR-0001 §2.5, KODI-005).
-   */
-  private writeIndex() {
-    const refs = this.collectRefs();
-    const lines = ['# Tickets', '', '| Key | Title | Status | Depends on |', '|---|---|---|---|'];
-    for (const t of refs) {
-      lines.push(`| ${t.key} | ${t.title} | ${t.status} | ${t.dependencies.join(', ') || '—'} |`);
-    }
-    lines.push('');
-    writeFileSync(this.paths.index, lines.join('\n'), 'utf-8');
   }
 }
 

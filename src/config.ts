@@ -79,16 +79,13 @@ export function loadBoardConfig(cwd = process.cwd()): BoardConfig {
  * The status-index model (ADR-0001 §2.2) is the source of truth: `statusYaml`
  * is the authoritative index and `folderFor` resolves one folder per status via
  * the frozen slug map. The two-folder `backlog`/`done` split has been retired
- * (ADR-0001 §2.2). The `index` (`tickets.md`) key is kept for now — it drives
- * the generated human-readable table; its retirement is a separate downstream
- * slice (ADR-0001 §2.5, KODI-005).
+ * (ADR-0001 §2.2). The generated `tickets.md` index has been retired
+ * (ADR-0001 §2.5): `status.yaml` is the sole authoritative index.
  */
 export function localPaths(cwd = process.cwd()) {
   const root = join(findProjectRoot(cwd), 'docs', 'tickets');
   return {
     root,
-    /** Generated human-readable table (retirement deferred to KODI-005). */
-    index: join(root, 'tickets.md'),
     /** Absolute path to the authoritative `status.yaml` index (data-model §2). */
     statusYaml: join(root, 'status.yaml'),
     /** Absolute on-disk folder a ticket in `status` is filed under (data-model §3). */

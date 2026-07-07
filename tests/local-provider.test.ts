@@ -270,10 +270,4 @@ describe('local ticket provider', () => {
     assertConsistent(t.key, t.slug, 'Pending');
     assertBijection();
   });
-
-  it('regenerates the tickets.md table from the index on write', async () => {
-    await provider.create(draft());
-    const tickets = readFileSync(join(ticketsRoot(), 'tickets.md'), 'utf-8');
-    expect(tickets).toContain('| KODI-001 |');
-  });
 });
