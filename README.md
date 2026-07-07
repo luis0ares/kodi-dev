@@ -7,7 +7,7 @@ requests. It runs **inside** a Claude Code session (host-driven); there is no
 separate engine and no `claude -p` process fleet.
 
 > Status: harness complete (F1–F5). End-to-end validation on a consumer project
-> (F6) and npm publish (F7) are pending. See `KODI-DESIGN.md` for the full design.
+> (F6) and npm publish (F7) are pending.
 
 ## Install
 
