@@ -20,7 +20,7 @@ export function normalizeOrgUrl(input: string): string {
 /** Parse `az devops project list -o json` into project names. */
 export function parseProjects(json: string): string[] {
   const data = JSON.parse(json);
-  const items: any[] = Array.isArray(data) ? data : data.value ?? [];
+  const items: any[] = Array.isArray(data) ? data : (data.value ?? []);
   return items.map((p) => p?.name).filter((n): n is string => typeof n === 'string');
 }
 
@@ -45,10 +45,25 @@ export function parseProjectInfo(json: string): ProjectInfo {
  * Fetch a project's info (proxy `az devops project show`). Returns null when the
  * project is unreachable (the az call failed), so the caller can abort.
  */
-export function getProjectInfo(org: string, project: string, run: Runner = defaultRunner): ProjectInfo | null {
+export function getProjectInfo(
+  org: string,
+  project: string,
+  run: Runner = defaultRunner,
+): ProjectInfo | null {
   try {
     return parseProjectInfo(
-      run(['az', 'devops', 'project', 'show', '--project', project, '--org', org, '--output', 'json']),
+      run([
+        'az',
+        'devops',
+        'project',
+        'show',
+        '--project',
+        project,
+        '--org',
+        org,
+        '--output',
+        'json',
+      ]),
     );
   } catch {
     return null;
@@ -73,18 +88,35 @@ export interface IssueState {
 /** Parse `az devops invoke … workItemTypeStates` output into states. */
 export function parseStates(json: string): IssueState[] {
   const d = JSON.parse(json);
-  const items: any[] = Array.isArray(d) ? d : d.value ?? [];
+  const items: any[] = Array.isArray(d) ? d : (d.value ?? []);
   return items
     .map((s) => ({ name: s?.name, category: s?.category }))
     .filter((s): s is IssueState => typeof s.name === 'string');
 }
 
 /** List the states of the Issue work-item type in a project (with categories). */
-export function listIssueStates(org: string, project: string, run: Runner = defaultRunner): IssueState[] {
+export function listIssueStates(
+  org: string,
+  project: string,
+  run: Runner = defaultRunner,
+): IssueState[] {
   const out = run([
-    'az', 'devops', 'invoke', '--area', 'wit', '--resource', 'workItemTypeStates',
-    '--route-parameters', `project=${project}`, 'type=Issue',
-    '--org', org, '--detect', 'false', '--output', 'json',
+    'az',
+    'devops',
+    'invoke',
+    '--area',
+    'wit',
+    '--resource',
+    'workItemTypeStates',
+    '--route-parameters',
+    `project=${project}`,
+    'type=Issue',
+    '--org',
+    org,
+    '--detect',
+    'false',
+    '--output',
+    'json',
   ]);
   return parseStates(out);
 }

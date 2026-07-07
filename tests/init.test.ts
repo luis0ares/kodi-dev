@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   configureBoard,
-  InitAbort,
   installHarness,
   mergeSessionStartHook,
   writeState,
@@ -25,10 +24,10 @@ function scripted(answers: { select?: string[]; input?: string[]; confirm?: bool
       return s.shift()!;
     },
     async input(_m, def) {
-      return i.length ? i.shift()! : def ?? '';
+      return i.length ? i.shift()! : (def ?? '');
     },
     async confirm(_m, def) {
-      return c.length ? c.shift()! : def ?? true;
+      return c.length ? c.shift()! : (def ?? true);
     },
     close() {},
   };
@@ -44,7 +43,8 @@ const BASIC_STATES: IssueState[] = [
 function fakeAz(template = 'Basic', states: IssueState[] = BASIC_STATES): Runner {
   return (args) => {
     if (args.includes('invoke')) return JSON.stringify({ value: states });
-    if (args.includes('list')) return JSON.stringify({ value: [{ name: 'Alpha' }, { name: 'Beta' }] });
+    if (args.includes('list'))
+      return JSON.stringify({ value: [{ name: 'Alpha' }, { name: 'Beta' }] });
     return JSON.stringify({ capabilities: { processTemplate: { templateName: template } } });
   };
 }
@@ -79,7 +79,9 @@ function fakeGh(o: GhOpts = {}): Runner {
     }
     if (args[1] === 'api') return `${o.login ?? 'octocat'}\n`;
     if (args[1] === 'repo' && args[2] === 'list') {
-      return JSON.stringify((o.repos ?? ['acme/app', 'acme/api']).map((r) => ({ nameWithOwner: r })));
+      return JSON.stringify(
+        (o.repos ?? ['acme/app', 'acme/api']).map((r) => ({ nameWithOwner: r })),
+      );
     }
     if (args[1] === 'repo' && args[2] === 'view') return `${o.repo ?? 'acme/app'}\n`;
     return '';
@@ -88,7 +90,9 @@ function fakeGh(o: GhOpts = {}): Runner {
 
 describe('SessionStart hook merge', () => {
   it('adds the hook, is idempotent, and preserves other hooks', () => {
-    const settings: Record<string, any> = { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [] }] } };
+    const settings: Record<string, any> = {
+      hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [] }] },
+    };
     expect(mergeSessionStartHook(settings)).toBe(true);
     expect(mergeSessionStartHook(settings)).toBe(false);
     expect(settings.hooks.SessionStart).toHaveLength(1);
@@ -145,7 +149,12 @@ describe('configureBoard wizard', () => {
     expect(cfg.organization).toBe('https://dev.azure.com/acme');
     expect(cfg.project).toBe('Beta');
     expect(cfg.repository).toBe('MyRepo');
-    expect(cfg.columns).toEqual({ todo: 'To Do', inProgress: 'Doing', toReview: 'Doing', done: 'Done' });
+    expect(cfg.columns).toEqual({
+      todo: 'To Do',
+      inProgress: 'Doing',
+      toReview: 'Doing',
+      done: 'Done',
+    });
   });
 
   it('lets the user SELECT the To Do column when several Proposed states exist', async () => {
@@ -156,7 +165,10 @@ describe('configureBoard wizard', () => {
       { name: 'Done', category: 'Completed' },
     ];
     const cfg = await configureBoard(
-      scripted({ select: ['azure', 'Beta', 'To Do'], input: ['https://dev.azure.com/acme', 'MyRepo'] }),
+      scripted({
+        select: ['azure', 'Beta', 'To Do'],
+        input: ['https://dev.azure.com/acme', 'MyRepo'],
+      }),
       { runner: fakeAz('Basic', states) },
     );
     expect(cfg.columns?.todo).toBe('To Do');
@@ -191,9 +203,12 @@ describe('configureBoard wizard', () => {
 
   it('aborts azure when the process has no Issue type (Agile)', async () => {
     await expect(
-      configureBoard(scripted({ select: ['azure', 'Beta'], input: ['https://dev.azure.com/acme'] }), {
-        runner: fakeAz('Agile'),
-      }),
+      configureBoard(
+        scripted({ select: ['azure', 'Beta'], input: ['https://dev.azure.com/acme'] }),
+        {
+          runner: fakeAz('Agile'),
+        },
+      ),
     ).rejects.toThrow(/Issue/);
   });
 
@@ -203,9 +218,12 @@ describe('configureBoard wizard', () => {
       { name: 'Done', category: 'Completed' },
     ];
     await expect(
-      configureBoard(scripted({ select: ['azure', 'Beta'], input: ['https://dev.azure.com/acme'] }), {
-        runner: fakeAz('Basic', states),
-      }),
+      configureBoard(
+        scripted({ select: ['azure', 'Beta'], input: ['https://dev.azure.com/acme'] }),
+        {
+          runner: fakeAz('Basic', states),
+        },
+      ),
     ).rejects.toThrow(/To Do-type/);
   });
 
@@ -219,7 +237,16 @@ describe('configureBoard wizard', () => {
     const cfg = await configureBoard(
       scripted({
         // repo select: current repo (acme/app) is surfaced first and chosen
-        select: ['github', 'organization', '#5 Roadmap', 'Todo', 'In Progress', 'In Progress', 'Done', 'acme/app'],
+        select: [
+          'github',
+          'organization',
+          '#5 Roadmap',
+          'Todo',
+          'In Progress',
+          'In Progress',
+          'Done',
+          'acme/app',
+        ],
         input: ['acme'], // org login
       }),
       { runner: fakeGh() },
@@ -228,21 +255,34 @@ describe('configureBoard wizard', () => {
     expect(cfg.projectOwner).toBe('acme');
     expect(cfg.projectNumber).toBe(5);
     expect(cfg.repository).toBe('acme/app');
-    expect(cfg.columns).toEqual({ todo: 'Todo', inProgress: 'In Progress', toReview: 'In Progress', done: 'Done' });
+    expect(cfg.columns).toEqual({
+      todo: 'Todo',
+      inProgress: 'In Progress',
+      toReview: 'In Progress',
+      done: 'Done',
+    });
   });
 
   it('configures github: user-owned defaults the owner to the authenticated login, auto-maps single option', async () => {
-    const cfg = await configureBoard(scripted({ select: ['github', 'user', '#5 Roadmap', 'octocat/app'] }), {
-      runner: fakeGh({
-        statusOptions: [{ id: 'o1', name: 'Todo' }],
-        login: 'octocat',
-        repo: 'octocat/app',
-        repos: ['octocat/app', 'octocat/site'],
-      }),
-    });
+    const cfg = await configureBoard(
+      scripted({ select: ['github', 'user', '#5 Roadmap', 'octocat/app'] }),
+      {
+        runner: fakeGh({
+          statusOptions: [{ id: 'o1', name: 'Todo' }],
+          login: 'octocat',
+          repo: 'octocat/app',
+          repos: ['octocat/app', 'octocat/site'],
+        }),
+      },
+    );
     expect(cfg.projectOwner).toBe('octocat');
     expect(cfg.repository).toBe('octocat/app');
-    expect(cfg.columns).toEqual({ todo: 'Todo', inProgress: 'Todo', toReview: 'Todo', done: 'Todo' });
+    expect(cfg.columns).toEqual({
+      todo: 'Todo',
+      inProgress: 'Todo',
+      toReview: 'Todo',
+      done: 'Todo',
+    });
   });
 
   it('configures github: falls back to free-text repo when the owner has no listable repos', async () => {
@@ -274,9 +314,12 @@ describe('configureBoard wizard', () => {
 
   it('aborts github when the board has no Status field', async () => {
     await expect(
-      configureBoard(scripted({ select: ['github', 'organization', '#5 Roadmap'], input: ['acme'] }), {
-        runner: fakeGh({ noStatusField: true }),
-      }),
+      configureBoard(
+        scripted({ select: ['github', 'organization', '#5 Roadmap'], input: ['acme'] }),
+        {
+          runner: fakeGh({ noStatusField: true }),
+        },
+      ),
     ).rejects.toThrow(/Status/);
   });
 
@@ -286,7 +329,9 @@ describe('configureBoard wizard', () => {
       return '';
     };
     await expect(
-      configureBoard(scripted({ select: ['github', 'organization'], input: ['acme'] }), { runner: throwing }),
+      configureBoard(scripted({ select: ['github', 'organization'], input: ['acme'] }), {
+        runner: throwing,
+      }),
     ).rejects.toThrow(/gh auth refresh -s project --hostname github.com/);
   });
 

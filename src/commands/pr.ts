@@ -33,27 +33,62 @@ function draftFromOptions(o: Record<string, unknown>): Pr {
   });
 }
 
-export function githubCreateArgs(pr: Pr, bodyFile: string, source: string, target: string, repo?: string): string[] {
-  const args = ['gh', 'pr', 'create', '--title', pr.title, '--body-file', bodyFile, '--base', target, '--head', source];
+export function githubCreateArgs(
+  pr: Pr,
+  bodyFile: string,
+  source: string,
+  target: string,
+  repo?: string,
+): string[] {
+  const args = [
+    'gh',
+    'pr',
+    'create',
+    '--title',
+    pr.title,
+    '--body-file',
+    bodyFile,
+    '--base',
+    target,
+    '--head',
+    source,
+  ];
   for (const r of pr.reviewers) args.push('--reviewer', r);
   if (repo) args.push('--repo', repo);
   return args;
 }
 
-export function azureCreateArgs(pr: Pr, html: string, source: string, target: string, repo?: string): string[] {
+export function azureCreateArgs(
+  pr: Pr,
+  html: string,
+  source: string,
+  target: string,
+  repo?: string,
+): string[] {
   const args = [
-    'az', 'repos', 'pr', 'create', '--title', pr.title, '--description', html,
-    '--source-branch', source, '--target-branch', target,
+    'az',
+    'repos',
+    'pr',
+    'create',
+    '--title',
+    pr.title,
+    '--description',
+    html,
+    '--source-branch',
+    source,
+    '--target-branch',
+    target,
   ];
   if (repo) args.push('--repository', repo);
   return args;
 }
 
 export function registerPrCommand(program: Command) {
-  const pr = program.command('pr').description('Manage pull requests (proxy gh/az) with a validated template');
+  const pr = program
+    .command('pr')
+    .description('Manage pull requests (proxy gh/az) with a validated template');
 
-  pr
-    .command('create')
+  pr.command('create')
     .description('Create a PR from a validated template draft')
     .option('-f, --file <path>', 'JSON PR draft (validated against the template)')
     .option('-t, --title <title>')
@@ -86,8 +121,7 @@ export function registerPrCommand(program: Command) {
       if (res.ran) process.stdout.write((res.stdout.trim() || 'PR created') + '\n');
     });
 
-  pr
-    .command('list')
+  pr.command('list')
     .description('List open pull requests')
     .option('--provider <github|azure>', 'override the PR provider')
     .option('--repository <repo>')
@@ -101,8 +135,7 @@ export function registerPrCommand(program: Command) {
       process.stdout.write(execRead(args));
     });
 
-  pr
-    .command('abandon <id>')
+  pr.command('abandon <id>')
     .description('Abandon/close a pull request')
     .option('--provider <github|azure>', 'override the PR provider')
     .option('--repository <repo>')

@@ -46,7 +46,13 @@ describe('pr command construction', () => {
   });
 
   it('builds a github create command (markdown body-file, base/head, reviewers, repo)', () => {
-    const args = githubCreateArgs(draft({ reviewers: ['octocat'] }), '/tmp/body.md', 'feat/x', 'main', 'acme/app');
+    const args = githubCreateArgs(
+      draft({ reviewers: ['octocat'] }),
+      '/tmp/body.md',
+      'feat/x',
+      'main',
+      'acme/app',
+    );
     expect(args.slice(0, 5)).toEqual(['gh', 'pr', 'create', '--title', 'Add dataset import']);
     expect(args).toContain('--body-file');
     expect(args).toContain('/tmp/body.md');

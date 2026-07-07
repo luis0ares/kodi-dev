@@ -1,11 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { localPaths } from '../config.js';
@@ -17,12 +10,7 @@ import {
   type Ticket,
   type TicketStatus,
 } from '../templates/ticket.js';
-import type {
-  ReadyResult,
-  StartProvenance,
-  TicketProvider,
-  TicketRef,
-} from './types.js';
+import type { ReadyResult, StartProvenance, TicketProvider, TicketRef } from './types.js';
 
 const FRONTMATTER = /^---\n([\s\S]*?)\n---\n?/;
 
@@ -91,8 +79,7 @@ export class LocalTicketProvider implements TicketProvider {
     if (existing) rmSync(join(existing.dir, existing.file));
     const dir = this.dirFor(ticket.status);
     const body =
-      `---\n${stringifyYaml(sortTicket(ticket)).trimEnd()}\n---\n\n` +
-      renderTicketMarkdown(ticket);
+      `---\n${stringifyYaml(sortTicket(ticket)).trimEnd()}\n---\n\n` + renderTicketMarkdown(ticket);
     writeFileSync(join(dir, this.fileName(ticket)), body, 'utf-8');
     this.writeIndex();
   }
@@ -188,7 +175,13 @@ export class LocalTicketProvider implements TicketProvider {
 }
 
 function toRef(t: StoredTicket): TicketRef {
-  return { key: t.key, title: t.title, status: t.status, slug: t.slug, dependencies: t.dependencies };
+  return {
+    key: t.key,
+    title: t.title,
+    status: t.status,
+    slug: t.slug,
+    dependencies: t.dependencies,
+  };
 }
 
 /** Stable field ordering for readable frontmatter. */

@@ -81,7 +81,9 @@ export interface AddResult {
 }
 
 export function installPack(root: string, packDir: string, force = false): AddResult {
-  const manifest = PackManifestSchema.parse(parseYaml(readFileSync(join(packDir, 'manifest.yaml'), 'utf-8')));
+  const manifest = PackManifestSchema.parse(
+    parseYaml(readFileSync(join(packDir, 'manifest.yaml'), 'utf-8')),
+  );
 
   const skills = copyTree(join(packDir, 'skills'), join(root, '.claude', 'skills'), force);
 

@@ -81,7 +81,12 @@ function copyTree(srcRoot: string, destRoot: string, force: boolean, reportBase:
  * Agents are organized by phase in the source but installed flat so discovery is
  * independent of project-agent subdirectory scanning. `README.md` files are skipped.
  */
-function copyMarkdownFlat(srcRoot: string, destDir: string, force: boolean, reportBase: string): string[] {
+function copyMarkdownFlat(
+  srcRoot: string,
+  destDir: string,
+  force: boolean,
+  reportBase: string,
+): string[] {
   const written: string[] = [];
   if (!existsSync(srcRoot)) return written;
   const walk = (dir: string) => {
@@ -162,13 +167,14 @@ export interface WizardOptions {
  * InitAbort when a required piece is missing (e.g. no To Do column) so the caller
  * can stop init and tell the user what's missing.
  */
-export async function configureBoard(prompter: Prompter, opts: WizardOptions = {}): Promise<BoardConfig> {
+export async function configureBoard(
+  prompter: Prompter,
+  opts: WizardOptions = {},
+): Promise<BoardConfig> {
   const provider =
     opts.provider ??
     ((await prompter.select('Which board provider?', ['local', 'github', 'azure'])) as
-      | 'local'
-      | 'github'
-      | 'azure');
+      'local' | 'github' | 'azure');
 
   if (provider === 'local') {
     const prefix = opts.prefix ?? (await prompter.input('Ticket key prefix', 'KODI'));
@@ -180,7 +186,8 @@ export async function configureBoard(prompter: Prompter, opts: WizardOptions = {
   }
 
   // Azure DevOps — tickets are always created as Issue work-items.
-  const orgInput = opts.org ?? (await prompter.input('Azure DevOps organization (name or URL, e.g. acme)'));
+  const orgInput =
+    opts.org ?? (await prompter.input('Azure DevOps organization (name or URL, e.g. acme)'));
   const org = normalizeOrgUrl(orgInput);
   if (!org) throw new InitAbort('missing: organization.');
 
@@ -199,7 +206,9 @@ export async function configureBoard(prompter: Prompter, opts: WizardOptions = {
   let project = opts.project;
   if (project) {
     if (!projects.includes(project)) {
-      throw new InitAbort(`project "${project}" not found in ${org} (found: ${projects.join(', ')}).`);
+      throw new InitAbort(
+        `project "${project}" not found in ${org} (found: ${projects.join(', ')}).`,
+      );
     }
   } else {
     project = await prompter.select('Select a project', projects);
@@ -256,18 +265,32 @@ export async function configureBoard(prompter: Prompter, opts: WizardOptions = {
         ? proposed[0]
         : await prompter.select('To Do column (where new issues are created)', proposed);
   } else {
-    todo = await prompter.input('To Do column (where new issues are created)', DEFAULT_COLUMNS.todo);
+    todo = await prompter.input(
+      'To Do column (where new issues are created)',
+      DEFAULT_COLUMNS.todo,
+    );
     if (!todo) throw new InitAbort('missing: the To Do column.');
   }
 
   const columns = {
     todo,
-    inProgress: await pick(opts.inProgressColumn, 'In Progress column', inProg, DEFAULT_COLUMNS.inProgress!),
-    toReview: await pick(opts.toReviewColumn, 'To Review column', inProg, DEFAULT_COLUMNS.toReview!),
+    inProgress: await pick(
+      opts.inProgressColumn,
+      'In Progress column',
+      inProg,
+      DEFAULT_COLUMNS.inProgress!,
+    ),
+    toReview: await pick(
+      opts.toReviewColumn,
+      'To Review column',
+      inProg,
+      DEFAULT_COLUMNS.toReview!,
+    ),
     done: await pick(opts.doneColumn, 'Done column', completed, DEFAULT_COLUMNS.done!),
   };
   const repository =
-    opts.repository ?? ((await prompter.input('Repository name for pull requests', project)) || project);
+    opts.repository ??
+    ((await prompter.input('Repository name for pull requests', project)) || project);
 
   return { provider: 'azure', prefix: 'KODI', organization: org, project, repository, columns };
 }
@@ -292,7 +315,11 @@ async function configureGithub(prompter: Prompter, opts: WizardOptions): Promise
   let owner = opts.projectOwner;
   if (!owner) {
     const ownerType =
-      opts.ownerType ?? (await prompter.select('Is the board owned by an organization or a user?', ['organization', 'user']));
+      opts.ownerType ??
+      (await prompter.select('Is the board owned by an organization or a user?', [
+        'organization',
+        'user',
+      ]));
     if (ownerType === 'user') {
       let login = '';
       try {
@@ -343,7 +370,8 @@ async function configureGithub(prompter: Prompter, opts: WizardOptions): Promise
     );
   }
   const options = statusField.options.map((o) => o.name);
-  if (options.length === 0) throw new InitAbort(`the Status field on project #${number} has no options.`);
+  if (options.length === 0)
+    throw new InitAbort(`the Status field on project #${number} has no options.`);
 
   // GitHub Status options carry no meta-categories, so the user picks each bucket
   // from the flat option list (auto-select when there's a single option).
@@ -374,15 +402,24 @@ async function configureGithub(prompter: Prompter, opts: WizardOptions): Promise
     }
     if (repos.length > 0) {
       // Surface the current repo first so it's the default-highlighted choice.
-      if (detected && repos.includes(detected)) repos = [detected, ...repos.filter((r) => r !== detected)];
+      if (detected && repos.includes(detected))
+        repos = [detected, ...repos.filter((r) => r !== detected)];
       repository = await prompter.select('Repository for issues', repos);
     } else {
-      repository = (await prompter.input('Repository for issues (owner/repo)', detected)) || detected;
+      repository =
+        (await prompter.input('Repository for issues (owner/repo)', detected)) || detected;
     }
   }
   if (!repository) throw new InitAbort('missing: repository (owner/repo).');
 
-  return { provider: 'github', prefix: 'KODI', repository, projectOwner: owner, projectNumber: number, columns };
+  return {
+    provider: 'github',
+    prefix: 'KODI',
+    repository,
+    projectOwner: owner,
+    projectNumber: number,
+    columns,
+  };
 }
 
 /** Persist the board config to the project's `.claude/kodi-dev.yaml`. */

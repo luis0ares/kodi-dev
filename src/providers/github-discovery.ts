@@ -15,7 +15,7 @@ export interface ProjectRef {
 /** Parse `gh project list --format json` into board refs. */
 export function parseProjects(json: string): ProjectRef[] {
   const data = JSON.parse(json);
-  const items: any[] = Array.isArray(data) ? data : data.projects ?? [];
+  const items: any[] = Array.isArray(data) ? data : (data.projects ?? []);
   return items
     .map((p) => ({ number: p?.number, title: p?.title ?? '', id: p?.id ?? '' }))
     .filter((p): p is ProjectRef => typeof p.number === 'number');
@@ -23,7 +23,17 @@ export function parseProjects(json: string): ProjectRef[] {
 
 /** List a owner's Projects v2 boards (proxy `gh project list`). */
 export function listProjects(owner: string, run: Runner = defaultRunner): ProjectRef[] {
-  const out = run(['gh', 'project', 'list', '--owner', owner, '--format', 'json', '--limit', '100']);
+  const out = run([
+    'gh',
+    'project',
+    'list',
+    '--owner',
+    owner,
+    '--format',
+    'json',
+    '--limit',
+    '100',
+  ]);
   return parseProjects(out);
 }
 
@@ -47,7 +57,10 @@ export function tokenScopes(run: Runner = defaultRunner): string[] | null {
   }
   const m = /^x-oauth-scopes:\s*(.*)$/im.exec(out);
   if (!m) return null;
-  return m[1].split(',').map((s) => s.trim()).filter(Boolean);
+  return m[1]
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 /**
@@ -69,7 +82,7 @@ export function detectRepo(run: Runner = defaultRunner): string {
 /** Parse `gh repo list --json nameWithOwner` into `owner/repo` names. */
 export function parseRepos(json: string): string[] {
   const data = JSON.parse(json);
-  const items: any[] = Array.isArray(data) ? data : data.repositories ?? [];
+  const items: any[] = Array.isArray(data) ? data : (data.repositories ?? []);
   return items.map((r) => r?.nameWithOwner).filter((n): n is string => typeof n === 'string');
 }
 
@@ -88,21 +101,38 @@ export interface StatusField {
 /** Parse `gh project field-list --format json`, returning the single-select Status field (or null). */
 export function parseStatusField(json: string): StatusField | null {
   const data = JSON.parse(json);
-  const fields: any[] = Array.isArray(data) ? data : data.fields ?? [];
+  const fields: any[] = Array.isArray(data) ? data : (data.fields ?? []);
   const status = fields.find(
-    (f) => typeof f?.name === 'string' && f.name.toLowerCase() === 'status' && Array.isArray(f?.options),
+    (f) =>
+      typeof f?.name === 'string' && f.name.toLowerCase() === 'status' && Array.isArray(f?.options),
   );
   if (!status) return null;
   const options = status.options
     .map((o: any) => ({ id: o?.id, name: o?.name }))
-    .filter((o: any): o is { id: string; name: string } => typeof o.id === 'string' && typeof o.name === 'string');
+    .filter(
+      (o: any): o is { id: string; name: string } =>
+        typeof o.id === 'string' && typeof o.name === 'string',
+    );
   return { id: status.id, options };
 }
 
 /** Fetch a board's Status field + options (proxy `gh project field-list`). Returns null when absent. */
-export function listStatusField(owner: string, number: number, run: Runner = defaultRunner): StatusField | null {
+export function listStatusField(
+  owner: string,
+  number: number,
+  run: Runner = defaultRunner,
+): StatusField | null {
   const out = run([
-    'gh', 'project', 'field-list', String(number), '--owner', owner, '--format', 'json', '--limit', '100',
+    'gh',
+    'project',
+    'field-list',
+    String(number),
+    '--owner',
+    owner,
+    '--format',
+    'json',
+    '--limit',
+    '100',
   ]);
   return parseStatusField(out);
 }
@@ -122,7 +152,11 @@ export function parseProjectId(json: string): string {
  * Resolve everything needed for writes: the project node id and the Status field
  * (id + option ids). Throws if the board has no Status field.
  */
-export function fetchProjectMeta(owner: string, number: number, run: Runner = defaultRunner): ProjectMeta {
+export function fetchProjectMeta(
+  owner: string,
+  number: number,
+  run: Runner = defaultRunner,
+): ProjectMeta {
   const projectId = parseProjectId(
     run(['gh', 'project', 'view', String(number), '--owner', owner, '--format', 'json']),
   );

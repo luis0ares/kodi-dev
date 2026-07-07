@@ -35,7 +35,12 @@ export function renderPrMarkdown(pr: Pr): string {
   lines.push(...bulletSection('Improvements', pr.improvements));
   lines.push(...bulletSection('Related issues', pr.relatedIssues));
   if (pr.notes) lines.push('', '## Notes', '', pr.notes);
-  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+  return (
+    lines
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trimEnd() + '\n'
+  );
 }
 
 /** Render the PR body as HTML (for az --description). */

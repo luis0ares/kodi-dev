@@ -1,7 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import { resolveProvider } from '../providers/index.js';
-import { TicketSchema, TICKET_STATUSES, type Ticket, type TicketStatus } from '../templates/ticket.js';
+import {
+  TicketSchema,
+  TICKET_STATUSES,
+  type Ticket,
+  type TicketStatus,
+} from '../templates/ticket.js';
 
 function out(data: unknown, json: boolean, human: () => string) {
   if (json) process.stdout.write(JSON.stringify(data) + '\n');
@@ -109,7 +114,10 @@ export function registerTicketsCommand(program: Command) {
         process.exitCode = 1;
         return;
       }
-      const t = await resolveProvider(process.cwd(), { yes: o.yes }).setStatus(key, status as TicketStatus);
+      const t = await resolveProvider(process.cwd(), { yes: o.yes }).setStatus(
+        key,
+        status as TicketStatus,
+      );
       out(t, o.json, () => `${t.key} → ${t.status}`);
     });
 
@@ -120,7 +128,9 @@ export function registerTicketsCommand(program: Command) {
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
-      const t = await resolveProvider(process.cwd(), { yes: o.yes }).start(key, { branch: o.branch });
+      const t = await resolveProvider(process.cwd(), { yes: o.yes }).start(key, {
+        branch: o.branch,
+      });
       out(t, o.json, () => `${t.key} → ${t.status}`);
     });
 
@@ -174,7 +184,7 @@ export function registerTicketsCommand(program: Command) {
 
   tickets
     .command('deps <key>')
-    .description('Read a ticket\'s dependencies, or declare new ones with --add')
+    .description("Read a ticket's dependencies, or declare new ones with --add")
     .option('--add <key>', 'declare a dependency (repeatable)', collect, [])
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
@@ -191,7 +201,11 @@ export function registerTicketsCommand(program: Command) {
         const t = await provider.amend(key, { dependencies: deps });
         out(t.dependencies, o.json, () => `${key} deps: ${t.dependencies.join(', ') || '(none)'}`);
       } else {
-        out(current.dependencies, o.json, () => `${key} deps: ${current.dependencies.join(', ') || '(none)'}`);
+        out(
+          current.dependencies,
+          o.json,
+          () => `${key} deps: ${current.dependencies.join(', ') || '(none)'}`,
+        );
       }
     });
 

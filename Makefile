@@ -2,7 +2,7 @@
 PKG := $(shell node -p "require('./package.json').name")
 
 .DEFAULT_GOAL := help
-.PHONY: help deps build test typecheck check install uninstall reinstall dev clean
+.PHONY: help deps build test typecheck lint check install uninstall reinstall dev clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -20,7 +20,10 @@ test: ## Run the test suite
 typecheck: ## Type-check without emitting
 	pnpm typecheck
 
-check: typecheck test ## Type-check + test
+lint: ## Lint (ESLint + Prettier check) across src/ + tests/
+	pnpm lint
+
+check: lint typecheck test ## Lint + type-check + test (lint first, fails cheap)
 
 install: build ## Build and install the kodi binary globally from local source
 	npm install -g .

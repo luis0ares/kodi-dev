@@ -35,7 +35,11 @@ describe('installPack', () => {
       'utf-8',
     );
     mkdirSync(join(pack, 'skills', 'fastapi-conventions'), { recursive: true });
-    writeFileSync(join(pack, 'skills', 'fastapi-conventions', 'SKILL.md'), '---\nname: fastapi-conventions\n---\nbody\n', 'utf-8');
+    writeFileSync(
+      join(pack, 'skills', 'fastapi-conventions', 'SKILL.md'),
+      '---\nname: fastapi-conventions\n---\nbody\n',
+      'utf-8',
+    );
   });
 
   afterEach(() => {
@@ -47,8 +51,12 @@ describe('installPack', () => {
     const res = installPack(root, pack);
     expect(res.name).toBe('fastapi-backend');
     expect(existsSync(join(root, '.claude/skills/fastapi-conventions/SKILL.md'))).toBe(true);
-    expect(readFileSync(join(root, 'CLAUDE.md'), 'utf-8')).toContain('**Backend:** FastAPI (Python)');
-    expect(readFileSync(join(root, '.claude/kodi/packs.yaml'), 'utf-8')).toContain('fastapi-backend');
+    expect(readFileSync(join(root, 'CLAUDE.md'), 'utf-8')).toContain(
+      '**Backend:** FastAPI (Python)',
+    );
+    expect(readFileSync(join(root, '.claude/kodi/packs.yaml'), 'utf-8')).toContain(
+      'fastapi-backend',
+    );
   });
 
   it('is idempotent — reinstalling does not duplicate the CLAUDE.md block or the pack record', () => {

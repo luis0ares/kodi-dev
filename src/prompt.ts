@@ -21,7 +21,9 @@ export function readlinePrompter(): Prompter {
     async select(message, choices) {
       if (choices.length === 0) throw new Error(`${message}: no choices available`);
       if (!process.stdin.isTTY) {
-        throw new Error(`cannot prompt "${message}" in non-interactive mode — pass the corresponding flag`);
+        throw new Error(
+          `cannot prompt "${message}" in non-interactive mode — pass the corresponding flag`,
+        );
       }
       return inqSelect({
         message,

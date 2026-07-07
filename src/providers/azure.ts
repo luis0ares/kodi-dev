@@ -80,7 +80,12 @@ export function parseWorkItem(
   if (!parsed.success) return null;
   const column: string = fields['System.State'] ?? fields['System.BoardColumn'] ?? '';
   const status = statusFromColumn(column, cols) ?? parsed.data.status;
-  return { ...parsed.data, key: String(id), slug: parsed.data.slug ?? slugify(parsed.data.title), status };
+  return {
+    ...parsed.data,
+    key: String(id),
+    slug: parsed.data.slug ?? slugify(parsed.data.title),
+    status,
+  };
 }
 
 export function createArgs(
@@ -90,10 +95,20 @@ export function createArgs(
   column: string,
 ): string[] {
   const args = [
-    'az', 'boards', 'work-item', 'create',
-    '--title', title, '--type', 'Issue',
-    '--fields', `System.State=${column}`, '--description', html,
-    '--output', 'json',
+    'az',
+    'boards',
+    'work-item',
+    'create',
+    '--title',
+    title,
+    '--type',
+    'Issue',
+    '--fields',
+    `System.State=${column}`,
+    '--description',
+    html,
+    '--output',
+    'json',
   ];
   if (coords.organization) args.push('--organization', coords.organization);
   if (coords.project) args.push('--project', coords.project);
@@ -149,15 +164,34 @@ export class AzureTicketProvider implements TicketProvider {
   }
 
   async get(key: string): Promise<StoredTicket | null> {
-    const out = execRead(['az', 'boards', 'work-item', 'show', '--id', key, '--output', 'json', ...this.orgArgs()]);
+    const out = execRead([
+      'az',
+      'boards',
+      'work-item',
+      'show',
+      '--id',
+      key,
+      '--output',
+      'json',
+      ...this.orgArgs(),
+    ]);
     const wi = JSON.parse(out);
     return parseWorkItem(wi.fields ?? {}, wi.id, this.columns);
   }
 
   async list(): Promise<TicketRef[]> {
     const wiql =
-      'SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = \'Issue\' ORDER BY [System.Id]';
-    const out = execRead(['az', 'boards', 'query', '--wiql', wiql, '--output', 'json', ...this.scopeArgs()]);
+      "SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = 'Issue' ORDER BY [System.Id]";
+    const out = execRead([
+      'az',
+      'boards',
+      'query',
+      '--wiql',
+      wiql,
+      '--output',
+      'json',
+      ...this.scopeArgs(),
+    ]);
     const rows: any[] = JSON.parse(out);
     const refs: TicketRef[] = [];
     for (const row of rows) {
@@ -187,7 +221,17 @@ export class AzureTicketProvider implements TicketProvider {
     const current = await this.get(key);
     if (!current) throw new Error(`work-item ${key} not found`);
     execMutate(
-      ['az', 'boards', 'work-item', 'update', '--id', key, '--fields', `System.State=${columnForStatus(status, this.columns)}`, ...this.orgArgs()],
+      [
+        'az',
+        'boards',
+        'work-item',
+        'update',
+        '--id',
+        key,
+        '--fields',
+        `System.State=${columnForStatus(status, this.columns)}`,
+        ...this.orgArgs(),
+      ],
       this.opts.dryRun,
     );
     return { ...current, status };
@@ -210,10 +254,19 @@ export class AzureTicketProvider implements TicketProvider {
   }
 
   async delete(key: string): Promise<void> {
-    execMutate(['az', 'boards', 'work-item', 'delete', '--id', key, '--yes', ...this.scopeArgs()], this.opts.dryRun);
+    execMutate(
+      ['az', 'boards', 'work-item', 'delete', '--id', key, '--yes', ...this.scopeArgs()],
+      this.opts.dryRun,
+    );
   }
 }
 
 function toRef(t: StoredTicket): TicketRef {
-  return { key: t.key, title: t.title, status: t.status, slug: t.slug, dependencies: t.dependencies };
+  return {
+    key: t.key,
+    title: t.title,
+    status: t.status,
+    slug: t.slug,
+    dependencies: t.dependencies,
+  };
 }

@@ -39,14 +39,14 @@ without clobbering other hooks.
   session.
 - **Three orchestrators, driven by explicit skills** (no auto-advancing pipeline):
 
-  | Phase | Skill | Orchestrator | Output |
-  |---|---|---|---|
-  | Briefing | `/discover` | main-loop | `briefing.md` + thin `CLAUDE.md` |
-  | Planning | `/oplan`, `/oreplan` | main-loop (hub-and-spoke) | phased plan in `docs/plan` |
-  | Ticketing | `/tickets` | main-loop | tickets on the board |
-  | Build | `/ticket-start` | `build-orchestrator` (sub-agent) | slice → gates → PR |
+  | Phase     | Skill                | Orchestrator                     | Output                           |
+  | --------- | -------------------- | -------------------------------- | -------------------------------- |
+  | Briefing  | `/discover`          | main-loop                        | `briefing.md` + thin `CLAUDE.md` |
+  | Planning  | `/oplan`, `/oreplan` | main-loop (hub-and-spoke)        | phased plan in `docs/plan`       |
+  | Ticketing | `/tickets`           | main-loop                        | tickets on the board             |
+  | Build     | `/ticket-start`      | `build-orchestrator` (sub-agent) | slice → gates → PR               |
 
-- **Neutral agents.** Engineers know their *role*, not the stack. The stack lives
+- **Neutral agents.** Engineers know their _role_, not the stack. The stack lives
   in the thin `CLAUDE.md` and installable **skill-packs** (`kodi add`).
 
 ## CLI
@@ -82,11 +82,11 @@ built-in board template has one).
 
 **What you supply; what kodi discovers:**
 
-| You provide | kodi discovers |
-| --- | --- |
-| whether the board is owned by an **org** or a **user** | the project **number** (pick from a list) |
-| the **owner login** (user-owned defaults to your login) | the Status field's **columns** (you map To Do / In Progress / To Review / Done) |
-| — | the **repository** (pick from the owner's repos; the current repo is offered first) |
+| You provide                                             | kodi discovers                                                                      |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| whether the board is owned by an **org** or a **user**  | the project **number** (pick from a list)                                           |
+| the **owner login** (user-owned defaults to your login) | the Status field's **columns** (you map To Do / In Progress / To Review / Done)     |
+| —                                                       | the **repository** (pick from the owner's repos; the current repo is offered first) |
 
 > GitHub's built-in board has only `Todo` / `In Progress` / `Done` — no "To Review".
 > You can map To Review onto another option, or add an "In Review" column to the board.

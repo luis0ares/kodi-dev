@@ -77,7 +77,11 @@ describe('local ticket provider', () => {
 
   it('amends editable fields and persists them', async () => {
     const t = await provider.create(draft());
-    await provider.amend(t.key, { summary: 'New summary', dependencies: ['KODI-050'], prUrl: 'owner/repo#12' });
+    await provider.amend(t.key, {
+      summary: 'New summary',
+      dependencies: ['KODI-050'],
+      prUrl: 'owner/repo#12',
+    });
     const got = await provider.get(t.key);
     expect(got!.summary).toBe('New summary');
     expect(got!.dependencies).toEqual(['KODI-050']);

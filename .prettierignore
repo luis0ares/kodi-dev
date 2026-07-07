@@ -1,0 +1,13 @@
+# Build output and deps — never format.
+dist/
+node_modules/
+# Board ships its own tooling/formatting (ADR-0003 §2.2).
+board/
+# Generated / vendored artifacts.
+pnpm-lock.yaml
+assets/
+archive/
+# ESLint-generated baseline (tool-owned format).
+eslint-suppressions.json
+# Local, untracked agent/editor settings — not part of the gate.
+.claude/

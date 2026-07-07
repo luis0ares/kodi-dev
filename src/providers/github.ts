@@ -81,11 +81,16 @@ export interface ProjectItem {
 /** Parse `gh project item-list --format json`, keeping only issue items. */
 export function parseItems(json: string): ProjectItem[] {
   const data = JSON.parse(json);
-  const items: any[] = Array.isArray(data) ? data : data.items ?? [];
+  const items: any[] = Array.isArray(data) ? data : (data.items ?? []);
   const out: ProjectItem[] = [];
   for (const it of items) {
     const content = it?.content ?? {};
-    if (content.type !== 'Issue' || typeof content.number !== 'number' || typeof it?.id !== 'string') continue;
+    if (
+      content.type !== 'Issue' ||
+      typeof content.number !== 'number' ||
+      typeof it?.id !== 'string'
+    )
+      continue;
     out.push({
       itemId: it.id,
       issueNumber: content.number,
@@ -96,20 +101,49 @@ export function parseItems(json: string): ProjectItem[] {
   return out;
 }
 
-export function createIssueArgs(repo: string | undefined, title: string, bodyFile: string): string[] {
+export function createIssueArgs(
+  repo: string | undefined,
+  title: string,
+  bodyFile: string,
+): string[] {
   const args = ['gh', 'issue', 'create', '--title', title, '--body-file', bodyFile];
   if (repo) args.push('--repo', repo);
   return args;
 }
 
 export function itemAddArgs(owner: string, number: number, issueUrl: string): string[] {
-  return ['gh', 'project', 'item-add', String(number), '--owner', owner, '--url', issueUrl, '--format', 'json'];
+  return [
+    'gh',
+    'project',
+    'item-add',
+    String(number),
+    '--owner',
+    owner,
+    '--url',
+    issueUrl,
+    '--format',
+    'json',
+  ];
 }
 
-export function itemEditArgs(projectId: string, itemId: string, fieldId: string, optionId: string): string[] {
+export function itemEditArgs(
+  projectId: string,
+  itemId: string,
+  fieldId: string,
+  optionId: string,
+): string[] {
   return [
-    'gh', 'project', 'item-edit',
-    '--id', itemId, '--project-id', projectId, '--field-id', fieldId, '--single-select-option-id', optionId,
+    'gh',
+    'project',
+    'item-edit',
+    '--id',
+    itemId,
+    '--project-id',
+    projectId,
+    '--field-id',
+    fieldId,
+    '--single-select-option-id',
+    optionId,
   ];
 }
 
@@ -145,8 +179,16 @@ export class GithubTicketProvider implements TicketProvider {
   private items(): ProjectItem[] {
     if (this.itemsCache) return this.itemsCache;
     const out = execRead([
-      'gh', 'project', 'item-list', String(this.opts.number),
-      '--owner', this.opts.owner, '--format', 'json', '--limit', '500',
+      'gh',
+      'project',
+      'item-list',
+      String(this.opts.number),
+      '--owner',
+      this.opts.owner,
+      '--format',
+      'json',
+      '--limit',
+      '500',
     ]);
     return (this.itemsCache = parseItems(out));
   }
@@ -154,7 +196,17 @@ export class GithubTicketProvider implements TicketProvider {
   /** Body for an item — from item-list when present, else a per-issue fallback fetch. */
   private bodyFor(item: ProjectItem): string {
     if (item.body != null) return item.body;
-    return execRead(['gh', 'issue', 'view', String(item.issueNumber), '--json', 'body', '-q', '.body', ...this.repoArgs()]);
+    return execRead([
+      'gh',
+      'issue',
+      'view',
+      String(item.issueNumber),
+      '--json',
+      'body',
+      '-q',
+      '.body',
+      ...this.repoArgs(),
+    ]);
   }
 
   private toStored(item: ProjectItem): StoredTicket | null {
@@ -177,7 +229,10 @@ export class GithubTicketProvider implements TicketProvider {
     if (!r1.ran) {
       // Preview the rest of the chain with placeholders (real URL/item-id unknown in dry-run).
       execMutate(itemAddArgs(this.opts.owner, this.opts.number, '<issue-url>'), this.opts.dryRun);
-      execMutate(itemEditArgs('<project-id>', '<item-id>', '<status-field-id>', '<option-id>'), this.opts.dryRun);
+      execMutate(
+        itemEditArgs('<project-id>', '<item-id>', '<status-field-id>', '<option-id>'),
+        this.opts.dryRun,
+      );
       return { ...draft, key: '(dry-run)' };
     }
     const url = r1.stdout.trim().split('\n').pop() ?? '';
@@ -190,7 +245,8 @@ export class GithubTicketProvider implements TicketProvider {
       const itemId = JSON.parse(add.stdout).id as string;
       const meta = this.projectMeta();
       const optionId = optionIdFor(meta.statusField, columnForStatus(input.status, this.columns));
-      if (optionId) execMutate(itemEditArgs(meta.projectId, itemId, meta.statusField.id, optionId), false);
+      if (optionId)
+        execMutate(itemEditArgs(meta.projectId, itemId, meta.statusField.id, optionId), false);
     } catch (e) {
       throw new Error(
         `issue #${num} was created (${url}) but could not be added to project #${this.opts.number}: ` +
@@ -235,8 +291,12 @@ export class GithubTicketProvider implements TicketProvider {
     if (!current) throw new Error(`issue ${key} has no kodi marker`);
     const meta = this.projectMeta();
     const optionId = optionIdFor(meta.statusField, columnForStatus(status, this.columns));
-    if (!optionId) throw new Error(`no Status option maps to "${status}" on project #${this.opts.number}`);
-    execMutate(itemEditArgs(meta.projectId, item.itemId, meta.statusField.id, optionId), this.opts.dryRun);
+    if (!optionId)
+      throw new Error(`no Status option maps to "${status}" on project #${this.opts.number}`);
+    execMutate(
+      itemEditArgs(meta.projectId, item.itemId, meta.statusField.id, optionId),
+      this.opts.dryRun,
+    );
     return { ...current, status };
   }
 
@@ -261,7 +321,13 @@ export class GithubTicketProvider implements TicketProvider {
 }
 
 function toRef(t: StoredTicket): TicketRef {
-  return { key: t.key, title: t.title, status: t.status, slug: t.slug, dependencies: t.dependencies };
+  return {
+    key: t.key,
+    title: t.title,
+    status: t.status,
+    slug: t.slug,
+    dependencies: t.dependencies,
+  };
 }
 
 /** Write an issue body to a temp file (gh reads --body-file). */

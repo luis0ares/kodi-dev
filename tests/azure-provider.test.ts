@@ -32,7 +32,12 @@ describe('markdown → html', () => {
 
 describe('azure provider — command construction', () => {
   it('builds a create command (issue work-item) with org and project', () => {
-    const args = createArgs({ organization: 'https://dev.azure.com/acme', project: 'Proj' }, 'T', '<p>x</p>', 'To Do');
+    const args = createArgs(
+      { organization: 'https://dev.azure.com/acme', project: 'Proj' },
+      'T',
+      '<p>x</p>',
+      'To Do',
+    );
     expect(args.slice(0, 6)).toEqual(['az', 'boards', 'work-item', 'create', '--title', 'T']);
     expect(args).toContain('--type');
     expect(args).toContain('Issue');
@@ -56,10 +61,7 @@ describe('azure provider — description round-trip', () => {
   it('embeds and recovers the canonical ticket via the marker', () => {
     const t = stored();
     const desc = descriptionHtml(t);
-    const back = parseWorkItem(
-      { 'System.Description': desc, 'System.State': 'In Progress' },
-      7,
-    );
+    const back = parseWorkItem({ 'System.Description': desc, 'System.State': 'In Progress' }, 7);
     expect(back).not.toBeNull();
     expect(back!.key).toBe('7');
     expect(back!.title).toBe('Add dataset import');

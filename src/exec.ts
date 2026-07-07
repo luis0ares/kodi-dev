@@ -47,5 +47,11 @@ export function execMutate(args: string[], dryRun: boolean): ExecResult {
   if (r.status !== 0) {
     throw new Error(`\`${command}\` failed (exit ${r.status}): ${r.stderr?.trim() || ''}`);
   }
-  return { command, ran: true, stdout: r.stdout ?? '', stderr: r.stderr ?? '', code: r.status ?? 0 };
+  return {
+    command,
+    ran: true,
+    stdout: r.stdout ?? '',
+    stderr: r.stderr ?? '',
+    code: r.status ?? 0,
+  };
 }
