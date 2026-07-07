@@ -1,13 +1,10 @@
 {
-  "name": "@luis0ares/kodi",
+  "name": "kodi-dev",
   "version": "0.0.0",
   "description": "kodi.dev — Claude Code-native agent orchestrator CLI",
   "license": "MIT",
   "author": "Luis Soares",
   "packageManager": "pnpm@11.5.0",
-  "publishConfig": {
-    "access": "public"
-  },
   "keywords": [
     "claude-code",
     "agents",

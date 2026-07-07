@@ -15,14 +15,14 @@ No global install needed — run it straight through `npx`:
 
 ```bash
 cd your-project
-npx @luis0ares/kodi init     # writes the SessionStart hook, phase skills, agents, and docs/ scaffold
-npx @luis0ares/kodi tickets list
+npx kodi-dev init     # writes the SessionStart hook, phase skills, agents, and docs/ scaffold
+npx kodi-dev tickets list
 ```
 
 Prefer a global binary?
 
 ```bash
-npm install -g @luis0ares/kodi
+npm install -g kodi-dev
 kodi init
 ```
 
