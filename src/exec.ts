@@ -23,7 +23,8 @@ function quote(args: string[]): string {
 /** Run a read-only command; always executes. Throws on non-zero exit. */
 export function execRead(args: string[]): string {
   const [cmd, ...rest] = args;
-  const r = spawnSync(cmd, rest, { encoding: 'utf-8' });
+  // stdin: 'ignore' so a proxied child (e.g. az) never drains the wizard's stdin.
+  const r = spawnSync(cmd, rest, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
   if (r.status !== 0) {
     throw new Error(`\`${quote(args)}\` failed (exit ${r.status}): ${r.stderr?.trim() || ''}`);
   }
@@ -42,7 +43,7 @@ export function execMutate(args: string[], dryRun: boolean): ExecResult {
     return { command, ran: false, stdout: '', stderr: '', code: 0 };
   }
   const [cmd, ...rest] = args;
-  const r = spawnSync(cmd, rest, { encoding: 'utf-8' });
+  const r = spawnSync(cmd, rest, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
   if (r.status !== 0) {
     throw new Error(`\`${command}\` failed (exit ${r.status}): ${r.stderr?.trim() || ''}`);
   }

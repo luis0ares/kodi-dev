@@ -34,8 +34,13 @@ function scripted(answers: { select?: string[]; input?: string[]; confirm?: bool
   };
 }
 
-const fakeAz: Runner = (args) =>
-  args.includes('list') ? JSON.stringify({ value: [{ name: 'Alpha' }, { name: 'Beta' }] }) : '{}';
+/** Fake `az` runner: `project list` returns two projects, `project show` returns the process template. */
+function fakeAz(template = 'Basic'): Runner {
+  return (args) =>
+    args.includes('list')
+      ? JSON.stringify({ value: [{ name: 'Alpha' }, { name: 'Beta' }] })
+      : JSON.stringify({ capabilities: { processTemplate: { templateName: template } } });
+}
 
 describe('SessionStart hook merge', () => {
   it('adds the hook, is idempotent, and preserves other hooks', () => {
@@ -82,7 +87,7 @@ describe('configureBoard wizard', () => {
         select: ['azure', 'Beta'],
         input: ['https://dev.azure.com/acme', 'To Do', 'Doing', 'Review', 'Done', 'MyRepo'],
       }),
-      { runner: fakeAz },
+      { runner: fakeAz() },
     );
     expect(cfg.provider).toBe('azure');
     expect(cfg.organization).toBe('https://dev.azure.com/acme');
@@ -91,18 +96,53 @@ describe('configureBoard wizard', () => {
     expect(cfg.columns).toEqual({ todo: 'To Do', inProgress: 'Doing', toReview: 'Review', done: 'Done' });
   });
 
+  it('configures azure non-interactively from flags', async () => {
+    const cfg = await configureBoard(scripted({}), {
+      provider: 'azure',
+      org: 'https://dev.azure.com/acme',
+      project: 'Beta',
+      todoColumn: 'To Do',
+      inProgressColumn: 'Doing',
+      toReviewColumn: 'Review',
+      doneColumn: 'Done',
+      repository: 'MyRepo',
+      runner: fakeAz(),
+    });
+    expect(cfg.project).toBe('Beta');
+    expect(cfg.columns?.todo).toBe('To Do');
+  });
+
+  it('aborts when a flagged project is not in the org', async () => {
+    await expect(
+      configureBoard(scripted({}), {
+        provider: 'azure',
+        org: 'https://dev.azure.com/acme',
+        project: 'Ghost',
+        runner: fakeAz(),
+      }),
+    ).rejects.toThrow(/not found/);
+  });
+
+  it('aborts azure when the process has no Issue type (Agile)', async () => {
+    await expect(
+      configureBoard(scripted({ select: ['azure', 'Beta'], input: ['https://dev.azure.com/acme'] }), {
+        runner: fakeAz('Agile'),
+      }),
+    ).rejects.toThrow(/Issue/);
+  });
+
   it('aborts azure when the To Do column is missing', async () => {
     await expect(
       configureBoard(
         scripted({ select: ['azure', 'Beta'], input: ['https://dev.azure.com/acme', ''] }),
-        { runner: fakeAz },
+        { runner: fakeAz() },
       ),
     ).rejects.toThrow(InitAbort);
   });
 
   it('aborts azure when the organization URL is missing', async () => {
     await expect(
-      configureBoard(scripted({ select: ['azure'], input: [''] }), { runner: fakeAz }),
+      configureBoard(scripted({ select: ['azure'], input: [''] }), { runner: fakeAz() }),
     ).rejects.toThrow(/organization/);
   });
 });

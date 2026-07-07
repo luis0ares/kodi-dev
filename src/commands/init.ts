@@ -13,7 +13,12 @@ import { Command } from 'commander';
 import { stringify as stringifyYaml } from 'yaml';
 import { stateFilePath, type BoardConfig } from '../config.js';
 import { DEFAULT_COLUMNS } from '../providers/azure.js';
-import { listProjects, projectReachable, type Runner } from '../providers/azure-discovery.js';
+import {
+  getProjectInfo,
+  listProjects,
+  processSupportsIssues,
+  type Runner,
+} from '../providers/azure-discovery.js';
 import { readlinePrompter, type Prompter } from '../prompt.js';
 
 const HOOK_COMMAND = 'kodi hook session-start';
@@ -124,6 +129,14 @@ export class InitAbort extends Error {}
 export interface WizardOptions {
   provider?: 'local' | 'azure';
   prefix?: string;
+  /** Non-interactive azure values (skip the matching prompt when provided). */
+  org?: string;
+  project?: string;
+  todoColumn?: string;
+  inProgressColumn?: string;
+  toReviewColumn?: string;
+  doneColumn?: string;
+  repository?: string;
   runner?: Runner;
 }
 
@@ -142,7 +155,7 @@ export async function configureBoard(prompter: Prompter, opts: WizardOptions = {
   }
 
   // Azure DevOps — tickets are always created as Issue work-items.
-  const org = await prompter.input('Azure DevOps organization URL (https://dev.azure.com/<org>)');
+  const org = opts.org ?? (await prompter.input('Azure DevOps organization URL (https://dev.azure.com/<org>)'));
   if (!org) throw new InitAbort('missing: organization URL.');
 
   let projects: string[];
@@ -157,16 +170,28 @@ export async function configureBoard(prompter: Prompter, opts: WizardOptions = {
   }
   if (projects.length === 0) throw new InitAbort(`no projects found in ${org}.`);
 
-  const project = await prompter.select('Select a project', projects);
-  if (!projectReachable(org, project, opts.runner)) {
-    throw new InitAbort(`project "${project}" is not reachable in ${org}.`);
+  let project = opts.project;
+  if (project) {
+    if (!projects.includes(project)) {
+      throw new InitAbort(`project "${project}" not found in ${org} (found: ${projects.join(', ')}).`);
+    }
+  } else {
+    project = await prompter.select('Select a project', projects);
   }
 
-  process.stdout.write(
-    '\nkodi creates every ticket as an Issue work-item that lands in your board\'s To Do column.\n' +
-      'Confirm the board columns (leave a value empty to abort if your board lacks it):\n',
-  );
-  const todo = await prompter.input('To Do column (where new issues are created)', DEFAULT_COLUMNS.todo);
+  // Verify the project is reachable AND its process supports the Issue type.
+  const info = getProjectInfo(org, project, opts.runner);
+  if (!info) throw new InitAbort(`project "${project}" is not reachable in ${org}.`);
+  if (!processSupportsIssues(info.processTemplate)) {
+    throw new InitAbort(
+      `project "${project}" uses the ${info.processTemplate} process, which has no "Issue" work-item type. ` +
+        `kodi creates tickets as Issues — use a Basic-process project (or add the Issue type), then re-run \`kodi init\`.`,
+    );
+  }
+
+  const todo =
+    opts.todoColumn ??
+    (await prompter.input('To Do column (where new issues are created)', DEFAULT_COLUMNS.todo));
   if (!todo) {
     throw new InitAbort(
       'missing: the To Do column. Configure a To Do column on the project board that accepts new Issues, then re-run `kodi init`.',
@@ -174,11 +199,16 @@ export async function configureBoard(prompter: Prompter, opts: WizardOptions = {
   }
   const columns = {
     todo,
-    inProgress: (await prompter.input('In Progress column', DEFAULT_COLUMNS.inProgress)) || DEFAULT_COLUMNS.inProgress,
-    toReview: (await prompter.input('To Review column', DEFAULT_COLUMNS.toReview)) || DEFAULT_COLUMNS.toReview,
-    done: (await prompter.input('Done column', DEFAULT_COLUMNS.done)) || DEFAULT_COLUMNS.done,
+    inProgress:
+      opts.inProgressColumn ??
+      ((await prompter.input('In Progress column', DEFAULT_COLUMNS.inProgress)) || DEFAULT_COLUMNS.inProgress),
+    toReview:
+      opts.toReviewColumn ??
+      ((await prompter.input('To Review column', DEFAULT_COLUMNS.toReview)) || DEFAULT_COLUMNS.toReview),
+    done: opts.doneColumn ?? ((await prompter.input('Done column', DEFAULT_COLUMNS.done)) || DEFAULT_COLUMNS.done),
   };
-  const repository = (await prompter.input('Repository name for pull requests', project)) || project;
+  const repository =
+    opts.repository ?? ((await prompter.input('Repository name for pull requests', project)) || project);
 
   return { provider: 'azure', prefix: 'KODI', organization: org, project, repository, columns };
 }
@@ -199,6 +229,13 @@ export function registerInitCommand(program: Command) {
     .option('--force', 'overwrite existing agents/skills', false)
     .option('--provider <local|azure>', 'skip the provider prompt')
     .option('--prefix <prefix>', 'local ticket key prefix (default KODI)')
+    .option('--org <url>', 'azure org URL (non-interactive)')
+    .option('--project <name>', 'azure project (non-interactive)')
+    .option('--todo-column <name>', 'azure To Do column (non-interactive)')
+    .option('--in-progress-column <name>', 'azure In Progress column')
+    .option('--to-review-column <name>', 'azure To Review column')
+    .option('--done-column <name>', 'azure Done column')
+    .option('--repository <name>', 'azure repository for PRs')
     .action(async (o) => {
       const root = String(o.dir);
 
@@ -210,7 +247,17 @@ export function registerInitCommand(program: Command) {
       let config: BoardConfig;
       try {
         // Configure the board FIRST so an abort leaves the project untouched.
-        config = await configureBoard(prompter, { provider, prefix: o.prefix });
+        config = await configureBoard(prompter, {
+          provider,
+          prefix: o.prefix,
+          org: o.org,
+          project: o.project,
+          todoColumn: o.todoColumn,
+          inProgressColumn: o.inProgressColumn,
+          toReviewColumn: o.toReviewColumn,
+          doneColumn: o.doneColumn,
+          repository: o.repository,
+        });
       } catch (e) {
         if (e instanceof InitAbort) {
           process.stderr.write(`\nkodi init aborted — ${e.message}\n`);
