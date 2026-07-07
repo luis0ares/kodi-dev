@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { slugForStatus } from './providers/status-index.js';
+import type { TicketStatus } from './templates/ticket.js';
 
 export type ProviderName = 'local' | 'github' | 'azure';
 
@@ -71,7 +73,14 @@ export function loadBoardConfig(cwd = process.cwd()): BoardConfig {
   }
 }
 
-/** Local provider storage paths, under the project root's `docs/tickets/`. */
+/**
+ * Local provider storage paths, under the project root's `docs/tickets/`.
+ *
+ * The legacy `backlog`/`done`/`index` keys are retained for the commands that
+ * still consume the old model (rewired in a later slice, ADR-0001 §2.5). The
+ * `statusYaml` path and the `folderFor` resolver are the additive status-index
+ * model surface (ADR-0001 §2.2): one folder per status via the frozen slug map.
+ */
 export function localPaths(cwd = process.cwd()) {
   const root = join(findProjectRoot(cwd), 'docs', 'tickets');
   return {
@@ -79,5 +88,11 @@ export function localPaths(cwd = process.cwd()) {
     backlog: join(root, 'backlog'),
     done: join(root, 'done'),
     index: join(root, 'tickets.md'),
+    /** Absolute path to the authoritative `status.yaml` index (data-model §2). */
+    statusYaml: join(root, 'status.yaml'),
+    /** Absolute on-disk folder a ticket in `status` is filed under (data-model §3). */
+    folderFor(status: TicketStatus): string {
+      return join(root, slugForStatus(status));
+    },
   };
 }
