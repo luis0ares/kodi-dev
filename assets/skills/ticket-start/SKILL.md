@@ -19,7 +19,9 @@ The build-orchestrator is the hub: engineers (`backend-engineer`,
 `frontend-tester`) write tests; gates (`qa-implementation`, `qa-visual`) plus a
 `security` bracket. The slice closes ONLY when every gate is green, there is no
 Critical/High security finding, and qa-implementation AND qa-visual are positive.
-Take the PR to `To Review` via `kodi pr` — never to `Done`.
+Take the PR to `To Review` via `kodi pr` — never to `Done`. On remote boards this
+is binding: `.claude/rules/ticket-completion.md` (In review + PR on finish; `Done`
+only on the user's explicit order).
 
 ## Flow
 

@@ -60,7 +60,9 @@ the reviews yourself.
    applicable) `qa-visual` are positive.
 7. **Hand off.** Open the PR to `To Review` via `kodi pr` and run
    `kodi tickets hand-off <key>`. NEVER move the ticket to `Done` — that is the
-   human's call on merge.
+   human's call on merge. This is binding policy: see
+   `.claude/rules/ticket-completion.md` (In review + PR on finish; `Done` only on
+   the user's explicit order).
 
 ## Output
 
