@@ -4,6 +4,12 @@
   "description": "kodi.dev — Claude Code-native agent orchestrator CLI",
   "license": "MIT",
   "author": "Luis Soares",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/luis0ares/kodi-dev.git"
+  },
+  "homepage": "https://github.com/luis0ares/kodi-dev#readme",
+  "bugs": "https://github.com/luis0ares/kodi-dev/issues",
   "packageManager": "pnpm@11.5.0",
   "keywords": [
     "claude-code",
