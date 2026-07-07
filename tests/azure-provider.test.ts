@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { mdToHtml } from '../src/html.js';
 import {
+  columnForStatus,
   createArgs,
+  DEFAULT_COLUMNS,
   descriptionHtml,
   parseWorkItem,
-  STATUS_COLUMN,
 } from '../src/providers/azure.js';
 import { TicketSchema, type StoredTicket } from '../src/templates/ticket.js';
 
@@ -30,19 +31,24 @@ describe('markdown → html', () => {
 });
 
 describe('azure provider — command construction', () => {
-  it('builds a create command with org and project', () => {
-    const args = createArgs({ organization: 'https://dev.azure.com/acme', project: 'Proj' }, 'T', '<p>x</p>', 'AI Generated');
+  it('builds a create command (issue work-item) with org and project', () => {
+    const args = createArgs({ organization: 'https://dev.azure.com/acme', project: 'Proj' }, 'T', '<p>x</p>', 'To Do');
     expect(args.slice(0, 6)).toEqual(['az', 'boards', 'work-item', 'create', '--title', 'T']);
-    expect(args).toContain('System.BoardColumn=AI Generated');
+    expect(args).toContain('--type');
+    expect(args).toContain('Issue');
+    expect(args).toContain('System.BoardColumn=To Do');
     expect(args).toContain('--organization');
     expect(args).toContain('https://dev.azure.com/acme');
     expect(args).toContain('Proj');
   });
 
-  it('maps statuses to board columns', () => {
-    expect(STATUS_COLUMN['Pending']).toBe('AI Generated');
-    expect(STATUS_COLUMN['To review']).toBe('To Review');
-    expect(STATUS_COLUMN['Done']).toBe('Done');
+  it('maps statuses to board columns via the column map', () => {
+    const cols = { todo: 'To Do', inProgress: 'Doing', toReview: 'Review', done: 'Done' };
+    expect(columnForStatus('Pending', cols)).toBe('To Do');
+    expect(columnForStatus('Blocked', cols)).toBe('To Do'); // blocked also lands in todo
+    expect(columnForStatus('In progress', cols)).toBe('Doing');
+    expect(columnForStatus('To review', cols)).toBe('Review');
+    expect(DEFAULT_COLUMNS.todo).toBe('To Do');
   });
 });
 

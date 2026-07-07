@@ -22,6 +22,7 @@ export function resolveProvider(cwd = process.cwd(), opts: ResolveOptions = {}):
       return new AzureTicketProvider({
         organization: cfg.organization,
         project: cfg.project,
+        columns: cfg.columns,
         dryRun: !opts.yes,
         cwd,
       });

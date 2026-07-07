@@ -1,3 +1,4 @@
+import type { ColumnMap } from '../config.js';
 import { execRead, execMutate } from '../exec.js';
 import { mdToHtml } from '../html.js';
 import {
@@ -11,21 +12,45 @@ import {
 import type { ReadyResult, StartProvenance, TicketProvider, TicketRef } from './types.js';
 
 /**
- * Azure DevOps Boards ticket provider. Work-items are tickets; the canonical
- * ticket record rides in the HTML description as a `<!-- kodi:ticket … -->`
- * marker so it round-trips losslessly. Status maps to System.BoardColumn. All
- * `az` calls are proxied here; mutations respect dry-run.
+ * Azure DevOps Boards ticket provider. Tickets are ALWAYS created as Issue
+ * work-items; the canonical ticket record rides in the HTML description as a
+ * `<!-- kodi:ticket … -->` marker so it round-trips losslessly. Status maps to
+ * System.BoardColumn via the column map discovered by `kodi init`. All `az`
+ * calls are proxied here; mutations respect dry-run.
  */
 
 const MARKER_RE = /<!--\s*kodi:ticket\s+(\{[\s\S]*?\})\s*-->/;
 
-export const STATUS_COLUMN: Record<TicketStatus, string> = {
-  Pending: 'AI Generated',
-  'In progress': 'In Progress',
-  'To review': 'To Review',
-  Done: 'Done',
-  Blocked: 'AI Generated',
+/** Fallback column names when the state file has none yet. */
+export const DEFAULT_COLUMNS: ColumnMap = {
+  todo: 'To Do',
+  inProgress: 'In Progress',
+  toReview: 'To Review',
+  done: 'Done',
 };
+
+/** Board column a status maps to (new issues + Blocked land in the todo column). */
+export function columnForStatus(status: TicketStatus, cols: ColumnMap): string {
+  switch (status) {
+    case 'In progress':
+      return cols.inProgress ?? DEFAULT_COLUMNS.inProgress!;
+    case 'To review':
+      return cols.toReview ?? DEFAULT_COLUMNS.toReview!;
+    case 'Done':
+      return cols.done ?? DEFAULT_COLUMNS.done!;
+    default:
+      return cols.todo;
+  }
+}
+
+/** Inverse mapping: a board column back to a ticket status. */
+export function statusFromColumn(column: string, cols: ColumnMap): TicketStatus | undefined {
+  if (column === cols.todo) return 'Pending';
+  if (column === (cols.inProgress ?? DEFAULT_COLUMNS.inProgress)) return 'In progress';
+  if (column === (cols.toReview ?? DEFAULT_COLUMNS.toReview)) return 'To review';
+  if (column === (cols.done ?? DEFAULT_COLUMNS.done)) return 'Done';
+  return undefined;
+}
 
 /** Build the HTML description (human body + hidden canonical marker). */
 export function descriptionHtml(t: StoredTicket): string {
@@ -34,16 +59,18 @@ export function descriptionHtml(t: StoredTicket): string {
 }
 
 /** Reconstruct a stored ticket from a work-item's id, column, and description. */
-export function parseWorkItem(fields: Record<string, any>, id: number): StoredTicket | null {
+export function parseWorkItem(
+  fields: Record<string, any>,
+  id: number,
+  cols: ColumnMap = DEFAULT_COLUMNS,
+): StoredTicket | null {
   const desc: string = fields['System.Description'] ?? '';
   const m = MARKER_RE.exec(desc);
   if (!m) return null;
   const parsed = TicketSchema.safeParse(JSON.parse(m[1]));
   if (!parsed.success) return null;
   const column: string = fields['System.BoardColumn'] ?? '';
-  const status =
-    (Object.entries(STATUS_COLUMN).find(([, c]) => c === column)?.[0] as TicketStatus) ??
-    parsed.data.status;
+  const status = statusFromColumn(column, cols) ?? parsed.data.status;
   return { ...parsed.data, key: String(id), slug: parsed.data.slug ?? slugify(parsed.data.title), status };
 }
 
@@ -66,14 +93,18 @@ export function createArgs(
 
 export class AzureTicketProvider implements TicketProvider {
   readonly name = 'azure';
+  private readonly columns: ColumnMap;
   constructor(
     private readonly opts: {
       organization?: string;
       project?: string;
       dryRun: boolean;
       cwd?: string;
+      columns?: ColumnMap;
     },
-  ) {}
+  ) {
+    this.columns = opts.columns ?? DEFAULT_COLUMNS;
+  }
 
   private coords() {
     return { organization: this.opts.organization, project: this.opts.project };
@@ -92,7 +123,7 @@ export class AzureTicketProvider implements TicketProvider {
     const draft: StoredTicket = { ...input, key: '(pending)', slug };
     const html = descriptionHtml(draft);
     const res = execMutate(
-      createArgs(this.coords(), input.title, html, STATUS_COLUMN[input.status]),
+      createArgs(this.coords(), input.title, html, columnForStatus(input.status, this.columns)),
       this.opts.dryRun,
     );
     if (!res.ran) return { ...draft, key: '(dry-run)' };
@@ -103,7 +134,7 @@ export class AzureTicketProvider implements TicketProvider {
   async get(key: string): Promise<StoredTicket | null> {
     const out = execRead(['az', 'boards', 'work-item', 'show', '--id', key, '--output', 'json', ...this.orgArgs()]);
     const wi = JSON.parse(out);
-    return parseWorkItem(wi.fields ?? {}, wi.id);
+    return parseWorkItem(wi.fields ?? {}, wi.id, this.columns);
   }
 
   async list(): Promise<TicketRef[]> {
@@ -139,7 +170,7 @@ export class AzureTicketProvider implements TicketProvider {
     const current = await this.get(key);
     if (!current) throw new Error(`work-item ${key} not found`);
     execMutate(
-      ['az', 'boards', 'work-item', 'update', '--id', key, '--fields', `System.BoardColumn=${STATUS_COLUMN[status]}`, ...this.orgArgs()],
+      ['az', 'boards', 'work-item', 'update', '--id', key, '--fields', `System.BoardColumn=${columnForStatus(status, this.columns)}`, ...this.orgArgs()],
       this.opts.dryRun,
     );
     return { ...current, status };

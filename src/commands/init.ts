@@ -10,6 +10,11 @@ import {
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
+import { stringify as stringifyYaml } from 'yaml';
+import { stateFilePath, type BoardConfig } from '../config.js';
+import { DEFAULT_COLUMNS } from '../providers/azure.js';
+import { listProjects, projectReachable, type Runner } from '../providers/azure-discovery.js';
+import { readlinePrompter, type Prompter } from '../prompt.js';
 
 const HOOK_COMMAND = 'kodi hook session-start';
 const SESSION_MATCHER = 'startup|resume|clear|compact';
@@ -34,10 +39,6 @@ export function defaultAssetsDir(): string {
   return fileURLToPath(new URL('../assets/', import.meta.url));
 }
 
-/**
- * Recursively copy a source tree into a destination, skipping files that already
- * exist unless `force`. Returns the destination-relative paths actually written.
- */
 function copyTree(srcRoot: string, destRoot: string, force: boolean, reportBase: string): string[] {
   const written: string[] = [];
   if (!existsSync(srcRoot)) return written;
@@ -45,9 +46,8 @@ function copyTree(srcRoot: string, destRoot: string, force: boolean, reportBase:
     for (const entry of readdirSync(src)) {
       const s = join(src, entry);
       const d = join(dest, entry);
-      if (statSync(s).isDirectory()) {
-        walk(s, d);
-      } else {
+      if (statSync(s).isDirectory()) walk(s, d);
+      else {
         if (existsSync(d) && !force) continue;
         mkdirSync(dirname(d), { recursive: true });
         copyFileSync(s, d);
@@ -61,10 +61,8 @@ function copyTree(srcRoot: string, destRoot: string, force: boolean, reportBase:
 
 /**
  * Copy every `*.md` under `srcRoot` (any depth) into a single flat `destDir`.
- * Agents are organized by phase in the source (assets/agents/<phase>/) but
- * installed flat into `.claude/agents/` so discovery is independent of whether
- * Claude Code scans project-agent subdirectories. `README.md` files (phase docs
- * like the empty ticketing folder) are skipped.
+ * Agents are organized by phase in the source but installed flat so discovery is
+ * independent of project-agent subdirectory scanning. `README.md` files are skipped.
  */
 function copyMarkdownFlat(srcRoot: string, destDir: string, force: boolean, reportBase: string): string[] {
   const written: string[] = [];
@@ -91,14 +89,13 @@ export interface InstallOptions {
   assetsDir?: string;
 }
 
-/** Install the kodi harness into a target project. Returns what changed. */
+/** Install the kodi harness FILES (hook, agents, skills, docs scaffold). */
 export function installHarness(root: string, opts: InstallOptions = {}): string[] {
   const force = opts.force ?? false;
   const assetsDir = opts.assetsDir ?? defaultAssetsDir();
   const claude = join(root, '.claude');
   const changed: string[] = [];
 
-  // 1. SessionStart hook (merge, never clobber other hooks)
   mkdirSync(claude, { recursive: true });
   const settingsPath = join(claude, 'settings.json');
   const settings: Record<string, any> = existsSync(settingsPath)
@@ -109,21 +106,11 @@ export function installHarness(root: string, opts: InstallOptions = {}): string[
     changed.push('.claude/settings.json (SessionStart hook)');
   }
 
-  // 2. Board config (default local; do not clobber)
-  const boardPath = join(claude, 'kodi', 'board.yaml');
-  if (!existsSync(boardPath)) {
-    mkdirSync(dirname(boardPath), { recursive: true });
-    writeFileSync(boardPath, 'provider: local\nprefix: KODI\n', 'utf-8');
-    changed.push('.claude/kodi/board.yaml');
-  }
-
-  // 3. Skills + agents copied from packaged assets
   changed.push(
     ...copyTree(join(assetsDir, 'skills'), join(claude, 'skills'), force, '.claude/skills'),
     ...copyMarkdownFlat(join(assetsDir, 'agents'), join(claude, 'agents'), force, '.claude/agents'),
   );
 
-  // 4. docs/ scaffold
   for (const sub of ['prd', 'adr', 'diagrams', 'plan', 'tickets', 'security']) {
     mkdirSync(join(root, 'docs', sub), { recursive: true });
   }
@@ -131,20 +118,116 @@ export function installHarness(root: string, opts: InstallOptions = {}): string[
   return changed;
 }
 
+/** Thrown to abort init with a human message; nothing is written after it. */
+export class InitAbort extends Error {}
+
+export interface WizardOptions {
+  provider?: 'local' | 'azure';
+  prefix?: string;
+  runner?: Runner;
+}
+
+/**
+ * Interactive board configuration. Returns the config to persist, or throws
+ * InitAbort when a required piece is missing (e.g. no To Do column) so the caller
+ * can stop init and tell the user what's missing.
+ */
+export async function configureBoard(prompter: Prompter, opts: WizardOptions = {}): Promise<BoardConfig> {
+  const provider =
+    opts.provider ?? ((await prompter.select('Which board provider?', ['local', 'azure'])) as 'local' | 'azure');
+
+  if (provider === 'local') {
+    const prefix = opts.prefix ?? (await prompter.input('Ticket key prefix', 'KODI'));
+    return { provider: 'local', prefix: prefix || 'KODI' };
+  }
+
+  // Azure DevOps — tickets are always created as Issue work-items.
+  const org = await prompter.input('Azure DevOps organization URL (https://dev.azure.com/<org>)');
+  if (!org) throw new InitAbort('missing: organization URL.');
+
+  let projects: string[];
+  try {
+    projects = listProjects(org, opts.runner);
+  } catch (e) {
+    throw new InitAbort(
+      `could not list projects for ${org}. Is \`az\` installed and logged in (az login / az devops login)? ${
+        e instanceof Error ? e.message : ''
+      }`,
+    );
+  }
+  if (projects.length === 0) throw new InitAbort(`no projects found in ${org}.`);
+
+  const project = await prompter.select('Select a project', projects);
+  if (!projectReachable(org, project, opts.runner)) {
+    throw new InitAbort(`project "${project}" is not reachable in ${org}.`);
+  }
+
+  process.stdout.write(
+    '\nkodi creates every ticket as an Issue work-item that lands in your board\'s To Do column.\n' +
+      'Confirm the board columns (leave a value empty to abort if your board lacks it):\n',
+  );
+  const todo = await prompter.input('To Do column (where new issues are created)', DEFAULT_COLUMNS.todo);
+  if (!todo) {
+    throw new InitAbort(
+      'missing: the To Do column. Configure a To Do column on the project board that accepts new Issues, then re-run `kodi init`.',
+    );
+  }
+  const columns = {
+    todo,
+    inProgress: (await prompter.input('In Progress column', DEFAULT_COLUMNS.inProgress)) || DEFAULT_COLUMNS.inProgress,
+    toReview: (await prompter.input('To Review column', DEFAULT_COLUMNS.toReview)) || DEFAULT_COLUMNS.toReview,
+    done: (await prompter.input('Done column', DEFAULT_COLUMNS.done)) || DEFAULT_COLUMNS.done,
+  };
+  const repository = (await prompter.input('Repository name for pull requests', project)) || project;
+
+  return { provider: 'azure', prefix: 'KODI', organization: org, project, repository, columns };
+}
+
+/** Persist the board config to the project's `.claude/kodi-dev.yaml`. */
+export function writeState(root: string, config: BoardConfig): string {
+  const path = stateFilePath(root);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, stringifyYaml(config), 'utf-8');
+  return path;
+}
+
 export function registerInitCommand(program: Command) {
   program
     .command('init')
-    .description('Install the kodi harness into this project (SessionStart hook + agents/skills + scaffold)')
+    .description('Install the kodi harness and configure the board (interactive)')
     .option('-d, --dir <path>', 'target project directory', process.cwd())
     .option('--force', 'overwrite existing agents/skills', false)
-    .action((o) => {
-      const changed = installHarness(String(o.dir), { force: o.force });
+    .option('--provider <local|azure>', 'skip the provider prompt')
+    .option('--prefix <prefix>', 'local ticket key prefix (default KODI)')
+    .action(async (o) => {
+      const root = String(o.dir);
+
+      // Non-TTY + azure without a way to prompt would hang — guard it.
+      let provider = o.provider as 'local' | 'azure' | undefined;
+      if (!provider && !process.stdin.isTTY) provider = 'local';
+
+      const prompter = readlinePrompter();
+      let config: BoardConfig;
+      try {
+        // Configure the board FIRST so an abort leaves the project untouched.
+        config = await configureBoard(prompter, { provider, prefix: o.prefix });
+      } catch (e) {
+        if (e instanceof InitAbort) {
+          process.stderr.write(`\nkodi init aborted — ${e.message}\n`);
+          process.exitCode = 1;
+          return;
+        }
+        throw e;
+      } finally {
+        prompter.close();
+      }
+
+      const changed = installHarness(root, { force: o.force });
+      const statePath = writeState(root, config);
       process.stdout.write(
-        changed.length
-          ? `kodi init: installed\n${changed.map((c) => `  + ${c}`).join('\n')}\n\n` +
-              `SessionStart wired to \`${HOOK_COMMAND}\` (matchers: ${SESSION_MATCHER}).\n` +
-              `Ensure \`kodi\` is on PATH (global install) so the hook resolves.\n`
-          : 'kodi init: already installed (nothing to change).\n',
+        `\nkodi init: installed\n${changed.map((c) => `  + ${c}`).join('\n')}\n` +
+          `  + ${relative(root, statePath)} (provider: ${config.provider})\n\n` +
+          `SessionStart wired to \`${HOOK_COMMAND}\` (matchers: ${SESSION_MATCHER}).\n`,
       );
     });
 }
