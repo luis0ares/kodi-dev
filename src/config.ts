@@ -76,17 +76,18 @@ export function loadBoardConfig(cwd = process.cwd()): BoardConfig {
 /**
  * Local provider storage paths, under the project root's `docs/tickets/`.
  *
- * The legacy `backlog`/`done`/`index` keys are retained for the commands that
- * still consume the old model (rewired in a later slice, ADR-0001 §2.5). The
- * `statusYaml` path and the `folderFor` resolver are the additive status-index
- * model surface (ADR-0001 §2.2): one folder per status via the frozen slug map.
+ * The status-index model (ADR-0001 §2.2) is the source of truth: `statusYaml`
+ * is the authoritative index and `folderFor` resolves one folder per status via
+ * the frozen slug map. The two-folder `backlog`/`done` split has been retired
+ * (ADR-0001 §2.2). The `index` (`tickets.md`) key is kept for now — it drives
+ * the generated human-readable table; its retirement is a separate downstream
+ * slice (ADR-0001 §2.5, KODI-005).
  */
 export function localPaths(cwd = process.cwd()) {
   const root = join(findProjectRoot(cwd), 'docs', 'tickets');
   return {
     root,
-    backlog: join(root, 'backlog'),
-    done: join(root, 'done'),
+    /** Generated human-readable table (retirement deferred to KODI-005). */
     index: join(root, 'tickets.md'),
     /** Absolute path to the authoritative `status.yaml` index (data-model §2). */
     statusYaml: join(root, 'status.yaml'),

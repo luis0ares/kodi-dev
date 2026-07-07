@@ -1,24 +1,47 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { basename, join } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { localPaths } from '../config.js';
 import {
   renderTicketMarkdown,
   slugify,
+  TICKET_STATUSES,
   TicketSchema,
   type StoredTicket,
   type Ticket,
   type TicketStatus,
 } from '../templates/ticket.js';
+import {
+  composeFile,
+  emptyDocument,
+  load,
+  remove,
+  resolveFile,
+  save,
+  upsert,
+  type StatusIndexEntry,
+} from './status-index.js';
 import type { ReadyResult, StartProvenance, TicketProvider, TicketRef } from './types.js';
 
 const FRONTMATTER = /^---\n([\s\S]*?)\n---\n?/;
 
 /**
- * Local markdown ticket provider. Each ticket is one file under
- * `docs/tickets/backlog/<KEY>-<slug>.md` (or `done/` when Done). The YAML
- * frontmatter is the canonical machine-readable record; the markdown body is a
- * rendered human view regenerated from it on every write.
+ * Local markdown ticket provider. Placement is owned by the authoritative
+ * `docs/tickets/status.yaml` index (data-model §1, Alternative B); each ticket
+ * markdown file lives under the folder for its status (`<slug>/<KEY>-<slug>.md`,
+ * data-model §2/§3). The index is the source of truth for a ticket's column
+ * (index-wins, §4); the file's frontmatter `status` is a mirrored value kept in
+ * sync on every transition. All reads/enumeration are index-driven and all
+ * writes follow the temp-then-rename, index-committed-last protocol (ADR-0001
+ * §2.4).
  */
 export class LocalTicketProvider implements TicketProvider {
   readonly name = 'local';
@@ -30,33 +53,32 @@ export class LocalTicketProvider implements TicketProvider {
     this.paths = localPaths(cwd);
   }
 
-  private ensureDirs() {
-    mkdirSync(this.paths.backlog, { recursive: true });
-    mkdirSync(this.paths.done, { recursive: true });
-  }
-
-  private fileName(t: { key: string; slug: string }) {
-    return `${t.key}-${t.slug}.md`;
-  }
-
-  /** Directory a ticket file lives in for a given status. */
-  private dirFor(status: TicketStatus) {
-    return status === 'Done' ? this.paths.done : this.paths.backlog;
-  }
-
-  private allFiles(): Array<{ dir: string; file: string }> {
-    const out: Array<{ dir: string; file: string }> = [];
-    for (const dir of [this.paths.backlog, this.paths.done]) {
-      if (!existsSync(dir)) continue;
-      for (const file of readdirSync(dir)) {
-        if (file.endsWith('.md')) out.push({ dir, file });
-      }
+  /**
+   * Lazy idempotent scaffold (R-003, ADR-0001 §2.3): ensure `status.yaml` and
+   * the five status folders exist. A valid pre-existing `status.yaml`
+   * short-circuits the fresh-index write, so re-running never duplicates or
+   * corrupts an existing index. `mkdirSync({recursive:true})` is itself
+   * idempotent for the folders.
+   */
+  private scaffold() {
+    // legacy-detection insertion point (KODI-006): a detect-and-report guard for
+    // pre-existing backlog/done data goes at the very top here, BEFORE any folder
+    // or status.yaml write. Intentionally not implemented in this slice.
+    if (!existsSync(this.paths.statusYaml)) {
+      save(this.paths.statusYaml, emptyDocument());
     }
-    return out;
+    for (const status of TICKET_STATUSES) {
+      mkdirSync(this.paths.folderFor(status), { recursive: true });
+    }
   }
 
-  private parseFile(dir: string, file: string): StoredTicket | null {
-    const raw = readFileSync(join(dir, file), 'utf-8');
+  private parseFile(path: string): StoredTicket | null {
+    let raw: string;
+    try {
+      raw = readFileSync(path, 'utf-8');
+    } catch {
+      return null;
+    }
     const m = FRONTMATTER.exec(raw);
     if (!m) return null;
     const meta = parseYaml(m[1]) ?? {};
@@ -65,56 +87,114 @@ export class LocalTicketProvider implements TicketProvider {
     return parsed.data as StoredTicket;
   }
 
-  private locate(key: string): { dir: string; file: string; ticket: StoredTicket } | null {
-    for (const { dir, file } of this.allFiles()) {
-      const ticket = this.parseFile(dir, file);
-      if (ticket && ticket.key === key) return { dir, file, ticket };
+  /**
+   * Resolve a ticket through the index (index-wins). Returns the absolute file
+   * path, the index entry (authoritative column), and the parsed ticket, or
+   * null when the key is not indexed / the pointer does not resolve.
+   */
+  private locate(
+    key: string,
+  ): { path: string; entry: StatusIndexEntry; ticket: StoredTicket } | null {
+    const doc = load(this.paths.statusYaml);
+    const entry = doc.tickets[key];
+    if (!entry) return null;
+    let path: string;
+    try {
+      path = resolveFile(this.paths.statusYaml, key, entry);
+    } catch {
+      return null;
     }
-    return null;
+    const ticket = this.parseFile(path);
+    if (!ticket) return null;
+    return { path, entry, ticket };
   }
 
-  private persist(ticket: StoredTicket) {
-    this.ensureDirs();
-    const existing = this.locate(ticket.key);
-    if (existing) rmSync(join(existing.dir, existing.file));
-    const dir = this.dirFor(ticket.status);
+  /**
+   * Write a ticket markdown file for its `ticket.status` column: render the body
+   * (frontmatter `status` mirrors the column) and land it via a random-suffixed,
+   * exclusively-opened temp file IN THE SAME target folder, then an intra-folder
+   * atomic rename over the final `<KEY>-<slug>.md` (ADR-0001 §2.4; SR-4/SR-5).
+   * Returns the final absolute path. `sortTicket()` output is byte-identical to
+   * the previous model (R-005).
+   */
+  private writeTicketFile(ticket: StoredTicket): string {
+    const dir = this.paths.folderFor(ticket.status);
+    mkdirSync(dir, { recursive: true });
+    // SR-1: never trust the caller's key/slug — route them through composeFile's
+    // assertKey/assertSlug validation and take the basename for the final filename.
+    const finalName = basename(composeFile(ticket.status, ticket.key, ticket.slug));
+    const finalPath = join(dir, finalName);
     const body =
       `---\n${stringifyYaml(sortTicket(ticket)).trimEnd()}\n---\n\n` + renderTicketMarkdown(ticket);
-    writeFileSync(join(dir, this.fileName(ticket)), body, 'utf-8');
-    this.writeIndex();
+    const tmp = join(dir, `.${finalName}.${randomBytes(6).toString('hex')}.tmp`);
+    try {
+      writeFileSync(tmp, body, { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
+      renameSync(tmp, finalPath);
+    } catch (err) {
+      try {
+        if (existsSync(tmp)) unlinkSync(tmp);
+      } catch {
+        // best-effort cleanup; surface the original failure
+      }
+      throw err;
+    }
+    return finalPath;
+  }
+
+  /** Index-driven enumeration: one ref per `status.yaml` entry, column-authoritative. */
+  private collectRefs(): TicketRef[] {
+    const doc = load(this.paths.statusYaml);
+    const refs: TicketRef[] = [];
+    for (const [key, entry] of Object.entries(doc.tickets)) {
+      let path: string;
+      try {
+        path = resolveFile(this.paths.statusYaml, key, entry);
+      } catch {
+        continue; // keep enumeration coherent + non-crashing on a bad pointer
+      }
+      const t = this.parseFile(path);
+      if (t) refs.push(toRef({ ...t, status: entry.column }));
+    }
+    return refs.sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }));
   }
 
   async nextId(prefix = this.prefix): Promise<string> {
+    const doc = load(this.paths.statusYaml);
     let max = 0;
-    for (const { dir, file } of this.allFiles()) {
-      const t = this.parseFile(dir, file);
-      if (!t) continue;
-      const m = /^([A-Z][A-Z0-9]*)-(\d+)$/.exec(t.key);
+    for (const key of Object.keys(doc.tickets)) {
+      const m = /^([A-Z][A-Z0-9]*)-(\d+)$/.exec(key);
       if (m && m[1] === prefix) max = Math.max(max, Number(m[2]));
     }
     return `${prefix}-${String(max + 1).padStart(3, '0')}`;
   }
 
   async create(input: Ticket): Promise<StoredTicket> {
+    this.scaffold();
     const key = input.key ?? (await this.nextId(this.prefix));
-    if (this.locate(key)) throw new Error(`ticket ${key} already exists`);
+    // dedupe via the authoritative index
+    if (load(this.paths.statusYaml).tickets[key]) {
+      throw new Error(`ticket ${key} already exists`);
+    }
     const slug = input.slug ?? slugify(input.title);
     const ticket: StoredTicket = { ...input, key, slug };
-    this.persist(ticket);
+    // file lands first via rename; index committed last (ADR-0001 §2.4)
+    this.writeTicketFile(ticket);
+    const doc = load(this.paths.statusYaml);
+    upsert(doc, { key, column: ticket.status, slug });
+    save(this.paths.statusYaml, doc);
+    this.writeIndex();
     return ticket;
   }
 
   async get(key: string): Promise<StoredTicket | null> {
-    return this.locate(key)?.ticket ?? null;
+    const found = this.locate(key);
+    if (!found) return null;
+    // index-wins: the index column is authoritative, frontmatter may be stale
+    return { ...found.ticket, status: found.entry.column };
   }
 
   async list(): Promise<TicketRef[]> {
-    const refs: TicketRef[] = [];
-    for (const { dir, file } of this.allFiles()) {
-      const t = this.parseFile(dir, file);
-      if (t) refs.push(toRef(t));
-    }
-    return refs.sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }));
+    return this.collectRefs();
   }
 
   async listReady(): Promise<ReadyResult> {
@@ -134,8 +214,15 @@ export class LocalTicketProvider implements TicketProvider {
   async setStatus(key: string, status: TicketStatus): Promise<StoredTicket> {
     const found = this.locate(key);
     if (!found) throw new Error(`ticket ${key} not found`);
-    const ticket = { ...found.ticket, status };
-    this.persist(ticket);
+    const oldPath = found.path;
+    const ticket: StoredTicket = { ...found.ticket, status };
+    // destination file first, then index commit, then drop the old file
+    const newPath = this.writeTicketFile(ticket);
+    const doc = load(this.paths.statusYaml);
+    upsert(doc, { key, column: status, slug: ticket.slug });
+    save(this.paths.statusYaml, doc);
+    if (oldPath !== newPath) unlinkSync(oldPath);
+    this.writeIndex();
     return ticket;
   }
 
@@ -146,25 +233,42 @@ export class LocalTicketProvider implements TicketProvider {
   async amend(key: string, patch: Partial<Ticket>): Promise<StoredTicket> {
     const found = this.locate(key);
     if (!found) throw new Error(`ticket ${key} not found`);
-    const ticket: StoredTicket = { ...found.ticket, ...patch, key, slug: found.ticket.slug };
-    this.persist(ticket);
+    // column is unchanged by amend (index-wins); never change key/slug
+    const column = found.entry.column;
+    const ticket: StoredTicket = {
+      ...found.ticket,
+      ...patch,
+      key,
+      slug: found.ticket.slug,
+      status: column,
+    };
+    // same folder → rename-over; index upsert is idempotent
+    this.writeTicketFile(ticket);
+    const doc = load(this.paths.statusYaml);
+    upsert(doc, { key, column, slug: ticket.slug });
+    save(this.paths.statusYaml, doc);
+    this.writeIndex();
     return ticket;
   }
 
   async delete(key: string): Promise<void> {
     const found = this.locate(key);
     if (!found) throw new Error(`ticket ${key} not found`);
-    rmSync(join(found.dir, found.file));
+    // index committed first (stops advertising the ticket), then unlink the file
+    const doc = load(this.paths.statusYaml);
+    remove(doc, key);
+    save(this.paths.statusYaml, doc);
+    unlinkSync(found.path);
     this.writeIndex();
   }
 
+  /**
+   * Regenerate the human-readable `tickets.md` table from the index-driven
+   * enumeration. Kept coherent + non-crashing; its retirement is a separate
+   * downstream slice (ADR-0001 §2.5, KODI-005).
+   */
   private writeIndex() {
-    const refs: TicketRef[] = [];
-    for (const { dir, file } of this.allFiles()) {
-      const t = this.parseFile(dir, file);
-      if (t) refs.push(toRef(t));
-    }
-    refs.sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }));
+    const refs = this.collectRefs();
     const lines = ['# Tickets', '', '| Key | Title | Status | Depends on |', '|---|---|---|---|'];
     for (const t of refs) {
       lines.push(`| ${t.key} | ${t.title} | ${t.status} | ${t.dependencies.join(', ') || '—'} |`);

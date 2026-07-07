@@ -6,6 +6,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { TICKET_STATUSES, type TicketStatus } from '../templates/ticket.js';
@@ -199,9 +200,9 @@ export function load(statusYamlPath: string): StatusIndexDocument {
 export function save(statusYamlPath: string, doc: StatusIndexDocument): void {
   const dir = dirname(statusYamlPath);
   mkdirSync(dir, { recursive: true });
-  const tmp = `${statusYamlPath}.tmp`;
+  const tmp = `${statusYamlPath}.${randomBytes(6).toString('hex')}.tmp`;
   try {
-    writeFileSync(tmp, serialize(doc), { encoding: 'utf-8', mode: 0o600 });
+    writeFileSync(tmp, serialize(doc), { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
     renameSync(tmp, statusYamlPath);
   } catch (err) {
     try {
