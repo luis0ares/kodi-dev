@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { azureCreateArgs, githubCreateArgs } from '../src/commands/pr.js';
+import { azureCreateArgs } from '../src/commands/pr.js';
 import { PrSchema, renderPrHtml, renderPrMarkdown } from '../src/templates/pr.js';
 
 function draft(over: Record<string, unknown> = {}) {
@@ -37,20 +37,6 @@ describe('pr template', () => {
 });
 
 describe('pr command construction', () => {
-  it('builds a github create command with reviewers and repo', () => {
-    const args = githubCreateArgs(draft({ reviewers: ['alice'] }), '/tmp/b.md', 'feat/x', 'main', 'owner/repo');
-    expect(args.slice(0, 4)).toEqual(['gh', 'pr', 'create', '--title']);
-    expect(args).toContain('--body-file');
-    expect(args).toContain('--base');
-    expect(args).toContain('main');
-    expect(args).toContain('--head');
-    expect(args).toContain('feat/x');
-    expect(args).toContain('--reviewer');
-    expect(args).toContain('alice');
-    expect(args).toContain('--repo');
-    expect(args).toContain('owner/repo');
-  });
-
   it('builds an azure create command', () => {
     const args = azureCreateArgs(draft(), '<p>x</p>', 'feat/x', 'main', 'Repo');
     expect(args.slice(0, 5)).toEqual(['az', 'repos', 'pr', 'create', '--title']);

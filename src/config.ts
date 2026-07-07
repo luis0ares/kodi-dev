@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 
-export type ProviderName = 'local' | 'github' | 'azure';
+export type ProviderName = 'local' | 'azure';
 
 export interface BoardConfig {
   provider: ProviderName;

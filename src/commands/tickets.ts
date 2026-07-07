@@ -32,7 +32,7 @@ function draftFromOptions(o: Record<string, unknown>) {
 export function registerTicketsCommand(program: Command) {
   const tickets = program
     .command('tickets')
-    .description('Manage tickets across the active provider (local / github / azure)');
+    .description('Manage tickets across the active provider (local / azure)');
 
   tickets
     .command('create')

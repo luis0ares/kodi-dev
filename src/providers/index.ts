@@ -1,6 +1,5 @@
 import { loadBoardConfig } from '../config.js';
 import { AzureTicketProvider } from './azure.js';
-import { GithubTicketProvider } from './github.js';
 import { LocalTicketProvider } from './local.js';
 import type { TicketProvider } from './types.js';
 
@@ -19,8 +18,6 @@ export function resolveProvider(cwd = process.cwd(), opts: ResolveOptions = {}):
   switch (cfg.provider) {
     case 'local':
       return new LocalTicketProvider(cfg.prefix, cwd);
-    case 'github':
-      return new GithubTicketProvider({ repo: cfg.repository, dryRun: !opts.yes, cwd });
     case 'azure':
       return new AzureTicketProvider({
         organization: cfg.organization,

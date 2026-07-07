@@ -20,9 +20,9 @@ export interface StartProvenance {
 }
 
 /**
- * The logical ticket interface. Every provider (local markdown, GitHub
- * Projects, Azure Boards) implements the SAME operations; callers never assume
- * where tickets live. Remote providers proxy `gh`/`az` internally.
+ * The logical ticket interface. Every provider (local markdown, Azure Boards)
+ * implements the SAME operations; callers never assume where tickets live.
+ * Remote providers proxy `az` internally. (GitHub support deferred.)
  */
 export interface TicketProvider {
   readonly name: string;
