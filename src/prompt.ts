@@ -21,6 +21,9 @@ export function readlinePrompter(): Prompter {
   return {
     async select(message, choices) {
       if (choices.length === 0) throw new Error(`${message}: no choices available`);
+      if (!process.stdin.isTTY) {
+        throw new Error(`cannot prompt "${message}" in non-interactive mode — pass the corresponding flag`);
+      }
       process.stdout.write(`\n${message}\n`);
       choices.forEach((c, i) => process.stdout.write(`  ${i + 1}) ${c}\n`));
       while (true) {
@@ -31,11 +34,13 @@ export function readlinePrompter(): Prompter {
       }
     },
     async input(message, def) {
+      if (!process.stdin.isTTY) return def ?? '';
       const suffix = def ? ` (${def})` : '';
       const answer = (await io().question(`${message}${suffix}: `)).trim();
       return answer || def || '';
     },
     async confirm(message, def = true) {
+      if (!process.stdin.isTTY) return def;
       const hint = def ? 'Y/n' : 'y/N';
       const answer = (await io().question(`${message} [${hint}]: `)).trim().toLowerCase();
       if (!answer) return def;

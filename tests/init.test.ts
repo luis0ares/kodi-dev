@@ -11,7 +11,7 @@ import {
   writeState,
 } from '../src/commands/init.js';
 import type { Prompter } from '../src/prompt.js';
-import { normalizeOrgUrl, type Runner } from '../src/providers/azure-discovery.js';
+import { normalizeOrgUrl, type IssueState, type Runner } from '../src/providers/azure-discovery.js';
 
 const REPO_ASSETS = fileURLToPath(new URL('../assets/', import.meta.url));
 
@@ -34,12 +34,19 @@ function scripted(answers: { select?: string[]; input?: string[]; confirm?: bool
   };
 }
 
-/** Fake `az` runner: `project list` returns two projects, `project show` returns the process template. */
-function fakeAz(template = 'Basic'): Runner {
-  return (args) =>
-    args.includes('list')
-      ? JSON.stringify({ value: [{ name: 'Alpha' }, { name: 'Beta' }] })
-      : JSON.stringify({ capabilities: { processTemplate: { templateName: template } } });
+const BASIC_STATES: IssueState[] = [
+  { name: 'To Do', category: 'Proposed' },
+  { name: 'Doing', category: 'InProgress' },
+  { name: 'Done', category: 'Completed' },
+];
+
+/** Fake `az`: project list, project show (process), and Issue-type states (invoke). */
+function fakeAz(template = 'Basic', states: IssueState[] = BASIC_STATES): Runner {
+  return (args) => {
+    if (args.includes('invoke')) return JSON.stringify({ value: states });
+    if (args.includes('list')) return JSON.stringify({ value: [{ name: 'Alpha' }, { name: 'Beta' }] });
+    return JSON.stringify({ capabilities: { processTemplate: { templateName: template } } });
+  };
 }
 
 describe('SessionStart hook merge', () => {
@@ -90,19 +97,31 @@ describe('configureBoard wizard', () => {
     expect(cfg).toEqual({ provider: 'local', prefix: 'MYPROJ' });
   });
 
-  it('configures azure: lists projects, selects one, captures the column map', async () => {
+  it('configures azure: lists projects, selects one, auto-maps single-candidate columns', async () => {
+    // Basic has one state per category → all columns auto-selected, no column prompts.
     const cfg = await configureBoard(
-      scripted({
-        select: ['azure', 'Beta'],
-        input: ['https://dev.azure.com/acme', 'To Do', 'Doing', 'Review', 'Done', 'MyRepo'],
-      }),
+      scripted({ select: ['azure', 'Beta'], input: ['https://dev.azure.com/acme', 'MyRepo'] }),
       { runner: fakeAz() },
     );
     expect(cfg.provider).toBe('azure');
     expect(cfg.organization).toBe('https://dev.azure.com/acme');
     expect(cfg.project).toBe('Beta');
     expect(cfg.repository).toBe('MyRepo');
-    expect(cfg.columns).toEqual({ todo: 'To Do', inProgress: 'Doing', toReview: 'Review', done: 'Done' });
+    expect(cfg.columns).toEqual({ todo: 'To Do', inProgress: 'Doing', toReview: 'Doing', done: 'Done' });
+  });
+
+  it('lets the user SELECT the To Do column when several Proposed states exist', async () => {
+    const states: IssueState[] = [
+      { name: 'New', category: 'Proposed' },
+      { name: 'To Do', category: 'Proposed' },
+      { name: 'Doing', category: 'InProgress' },
+      { name: 'Done', category: 'Completed' },
+    ];
+    const cfg = await configureBoard(
+      scripted({ select: ['azure', 'Beta', 'To Do'], input: ['https://dev.azure.com/acme', 'MyRepo'] }),
+      { runner: fakeAz('Basic', states) },
+    );
+    expect(cfg.columns?.todo).toBe('To Do');
   });
 
   it('configures azure non-interactively from flags', async () => {
@@ -140,13 +159,16 @@ describe('configureBoard wizard', () => {
     ).rejects.toThrow(/Issue/);
   });
 
-  it('aborts azure when the To Do column is missing', async () => {
+  it('aborts when the board has no To Do-type (Proposed) state', async () => {
+    const states: IssueState[] = [
+      { name: 'Doing', category: 'InProgress' },
+      { name: 'Done', category: 'Completed' },
+    ];
     await expect(
-      configureBoard(
-        scripted({ select: ['azure', 'Beta'], input: ['https://dev.azure.com/acme', ''] }),
-        { runner: fakeAz() },
-      ),
-    ).rejects.toThrow(InitAbort);
+      configureBoard(scripted({ select: ['azure', 'Beta'], input: ['https://dev.azure.com/acme'] }), {
+        runner: fakeAz('Basic', states),
+      }),
+    ).rejects.toThrow(/To Do-type/);
   });
 
   it('aborts azure when the organization URL is missing', async () => {

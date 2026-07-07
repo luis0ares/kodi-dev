@@ -15,9 +15,12 @@ import { stateFilePath, type BoardConfig } from '../config.js';
 import { DEFAULT_COLUMNS } from '../providers/azure.js';
 import {
   getProjectInfo,
+  listIssueStates,
   listProjects,
   normalizeOrgUrl,
   processSupportsIssues,
+  statesInCategory,
+  type IssueState,
   type Runner,
 } from '../providers/azure-discovery.js';
 import { readlinePrompter, type Prompter } from '../prompt.js';
@@ -191,23 +194,56 @@ export async function configureBoard(prompter: Prompter, opts: WizardOptions = {
     );
   }
 
-  const todo =
-    opts.todoColumn ??
-    (await prompter.input('To Do column (where new issues are created)', DEFAULT_COLUMNS.todo));
-  if (!todo) {
-    throw new InitAbort(
-      'missing: the To Do column. Configure a To Do column on the project board that accepts new Issues, then re-run `kodi init`.',
-    );
+  // Discover the board's Issue states (categorized) so the user picks REAL
+  // columns instead of typing them. States fall into meta-categories:
+  // Proposed = To Do-type, InProgress = doing/review, Completed = done.
+  let states: IssueState[] = [];
+  try {
+    states = listIssueStates(org, project, opts.runner);
+  } catch {
+    /* invoke unavailable → fall back to free-text prompts below */
   }
+  const proposed = statesInCategory(states, 'Proposed');
+  const inProg = statesInCategory(states, 'InProgress');
+  const completed = statesInCategory(states, 'Completed');
+
+  // Pick a column: use the flag, else auto (1 candidate), else select, else free-text.
+  const pick = async (
+    flag: string | undefined,
+    message: string,
+    candidates: string[],
+    def: string,
+  ): Promise<string> => {
+    if (flag) return flag;
+    if (candidates.length === 1) return candidates[0];
+    if (candidates.length > 1) return prompter.select(message, candidates);
+    return (await prompter.input(message, def)) || def;
+  };
+
+  // To Do column (where new issues are created) — the explicit selection.
+  let todo: string;
+  if (opts.todoColumn) {
+    todo = opts.todoColumn;
+  } else if (states.length > 0 && proposed.length === 0) {
+    throw new InitAbort(
+      'no To Do-type column: the Issue type on this board has no "Proposed" state where new issues can land. ' +
+        'Add a To Do column/state to the board, then re-run `kodi init`.',
+    );
+  } else if (proposed.length > 0) {
+    todo =
+      proposed.length === 1
+        ? proposed[0]
+        : await prompter.select('To Do column (where new issues are created)', proposed);
+  } else {
+    todo = await prompter.input('To Do column (where new issues are created)', DEFAULT_COLUMNS.todo);
+    if (!todo) throw new InitAbort('missing: the To Do column.');
+  }
+
   const columns = {
     todo,
-    inProgress:
-      opts.inProgressColumn ??
-      ((await prompter.input('In Progress column', DEFAULT_COLUMNS.inProgress)) || DEFAULT_COLUMNS.inProgress),
-    toReview:
-      opts.toReviewColumn ??
-      ((await prompter.input('To Review column', DEFAULT_COLUMNS.toReview)) || DEFAULT_COLUMNS.toReview),
-    done: opts.doneColumn ?? ((await prompter.input('Done column', DEFAULT_COLUMNS.done)) || DEFAULT_COLUMNS.done),
+    inProgress: await pick(opts.inProgressColumn, 'In Progress column', inProg, DEFAULT_COLUMNS.inProgress!),
+    toReview: await pick(opts.toReviewColumn, 'To Review column', inProg, DEFAULT_COLUMNS.toReview!),
+    done: await pick(opts.doneColumn, 'Done column', completed, DEFAULT_COLUMNS.done!),
   };
   const repository =
     opts.repository ?? ((await prompter.input('Repository name for pull requests', project)) || project);

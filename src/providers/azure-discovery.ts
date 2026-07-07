@@ -63,3 +63,33 @@ export function getProjectInfo(org: string, project: string, run: Runner = defau
 export function processSupportsIssues(template: string | undefined): boolean {
   return template !== 'Agile' && template !== 'Scrum';
 }
+
+/** A work-item state and its meta-category (Proposed / InProgress / Completed / …). */
+export interface IssueState {
+  name: string;
+  category: string;
+}
+
+/** Parse `az devops invoke … workItemTypeStates` output into states. */
+export function parseStates(json: string): IssueState[] {
+  const d = JSON.parse(json);
+  const items: any[] = Array.isArray(d) ? d : d.value ?? [];
+  return items
+    .map((s) => ({ name: s?.name, category: s?.category }))
+    .filter((s): s is IssueState => typeof s.name === 'string');
+}
+
+/** List the states of the Issue work-item type in a project (with categories). */
+export function listIssueStates(org: string, project: string, run: Runner = defaultRunner): IssueState[] {
+  const out = run([
+    'az', 'devops', 'invoke', '--area', 'wit', '--resource', 'workItemTypeStates',
+    '--route-parameters', `project=${project}`, 'type=Issue',
+    '--org', org, '--detect', 'false', '--output', 'json',
+  ]);
+  return parseStates(out);
+}
+
+/** State names in a given meta-category (e.g. "Proposed" = the To Do-type columns). */
+export function statesInCategory(states: IssueState[], category: string): string[] {
+  return states.filter((s) => s.category === category).map((s) => s.name);
+}
