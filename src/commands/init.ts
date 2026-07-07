@@ -59,6 +59,33 @@ function copyTree(srcRoot: string, destRoot: string, force: boolean, reportBase:
   return written;
 }
 
+/**
+ * Copy every `*.md` under `srcRoot` (any depth) into a single flat `destDir`.
+ * Agents are organized by phase in the source (assets/agents/<phase>/) but
+ * installed flat into `.claude/agents/` so discovery is independent of whether
+ * Claude Code scans project-agent subdirectories. `README.md` files (phase docs
+ * like the empty ticketing folder) are skipped.
+ */
+function copyMarkdownFlat(srcRoot: string, destDir: string, force: boolean, reportBase: string): string[] {
+  const written: string[] = [];
+  if (!existsSync(srcRoot)) return written;
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      const s = join(dir, entry);
+      if (statSync(s).isDirectory()) walk(s);
+      else if (entry.endsWith('.md') && entry !== 'README.md') {
+        const d = join(destDir, entry);
+        if (existsSync(d) && !force) continue;
+        mkdirSync(destDir, { recursive: true });
+        copyFileSync(s, d);
+        written.push(join(reportBase, entry));
+      }
+    }
+  };
+  walk(srcRoot);
+  return written;
+}
+
 export interface InstallOptions {
   force?: boolean;
   assetsDir?: string;
@@ -93,7 +120,7 @@ export function installHarness(root: string, opts: InstallOptions = {}): string[
   // 3. Skills + agents copied from packaged assets
   changed.push(
     ...copyTree(join(assetsDir, 'skills'), join(claude, 'skills'), force, '.claude/skills'),
-    ...copyTree(join(assetsDir, 'agents'), join(claude, 'agents'), force, '.claude/agents'),
+    ...copyMarkdownFlat(join(assetsDir, 'agents'), join(claude, 'agents'), force, '.claude/agents'),
   );
 
   // 4. docs/ scaffold
