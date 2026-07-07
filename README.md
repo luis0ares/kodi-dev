@@ -11,10 +11,25 @@ separate engine and no `claude -p` process fleet.
 
 ## Install
 
+No global install needed — run it straight through `npx`:
+
 ```bash
-npm install -g kodi        # or: npx kodi <cmd>
 cd your-project
-kodi init                  # writes the SessionStart hook, phase skills, agents, and docs/ scaffold
+npx @luis0ares/kodi init     # writes the SessionStart hook, phase skills, agents, and docs/ scaffold
+npx @luis0ares/kodi tickets list
+```
+
+Prefer a global binary?
+
+```bash
+npm install -g @luis0ares/kodi
+kodi init
+```
+
+Or build & install from a local clone (no npm registry) — see the `Makefile`:
+
+```bash
+make install     # build + install the kodi binary globally from source
 ```
 
 `kodi init` is idempotent — it merges into an existing `.claude/settings.json`
