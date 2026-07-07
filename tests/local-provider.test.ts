@@ -75,6 +75,17 @@ describe('local ticket provider', () => {
     expect(await provider.get(t.key)).toBeNull();
   });
 
+  it('amends editable fields and persists them', async () => {
+    const t = await provider.create(draft());
+    await provider.amend(t.key, { summary: 'New summary', dependencies: ['KODI-050'], prUrl: 'owner/repo#12' });
+    const got = await provider.get(t.key);
+    expect(got!.summary).toBe('New summary');
+    expect(got!.dependencies).toEqual(['KODI-050']);
+    expect(got!.prUrl).toBe('owner/repo#12');
+    expect(got!.key).toBe(t.key);
+    expect(got!.slug).toBe(t.slug);
+  });
+
   it('regenerates the index on write', async () => {
     await provider.create(draft());
     const index = readFileSync(join(dir, 'docs/tickets/tickets.md'), 'utf-8');

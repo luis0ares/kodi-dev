@@ -34,5 +34,7 @@ export interface TicketProvider {
   listReady(): Promise<ReadyResult>;
   setStatus(key: string, status: TicketStatus): Promise<StoredTicket>;
   start(key: string, provenance: StartProvenance): Promise<StoredTicket>;
+  /** Patch a ticket's editable fields (summary, criteria, deps, prUrl, …). */
+  amend(key: string, patch: Partial<Ticket>): Promise<StoredTicket>;
   delete(key: string): Promise<void>;
 }

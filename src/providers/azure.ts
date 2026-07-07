@@ -149,6 +149,18 @@ export class AzureTicketProvider implements TicketProvider {
     return this.setStatus(key, 'In progress');
   }
 
+  async amend(key: string, patch: Partial<Ticket>): Promise<StoredTicket> {
+    const current = await this.get(key);
+    if (!current) throw new Error(`work-item ${key} not found`);
+    const merged: StoredTicket = { ...current, ...patch, key, slug: current.slug };
+    const fields = [`System.Description=${descriptionHtml(merged)}`];
+    if (patch.title) fields.push(`System.Title=${patch.title}`);
+    const args = ['az', 'boards', 'work-item', 'update', '--id', key];
+    for (const f of fields) args.push('--fields', f);
+    execMutate([...args, ...this.orgArgs()], this.opts.dryRun);
+    return merged;
+  }
+
   async delete(key: string): Promise<void> {
     execMutate(['az', 'boards', 'work-item', 'delete', '--id', key, '--yes', ...this.orgArgs()], this.opts.dryRun);
   }

@@ -50,6 +50,8 @@ export const TicketSchema = z.object({
   /** Ticket keys that must reach Done before this one can start. */
   dependencies: z.array(z.string()).default([]),
   drivers: TicketDriversSchema.default({}),
+  /** Linked pull request (branch, URL, or id) — set by `link-pr` / `hand-off`. */
+  prUrl: z.string().optional(),
   notes: z.string().optional(),
 });
 
@@ -83,6 +85,7 @@ export function renderTicketMarkdown(t: StoredTicket): string {
   if (t.drivers.adr.length) drivers.push(`ADR ${t.drivers.adr.join(', ')}`);
   if (t.drivers.security) drivers.push(`Security ${t.drivers.security}`);
   if (drivers.length) lines.push(`**Drivers:** ${drivers.join(' · ')}`);
+  if (t.prUrl) lines.push(`**PR:** ${t.prUrl}`);
   lines.push('', '## Summary', '', t.summary, '');
   lines.push('## Acceptance criteria', '');
   for (const ac of t.acceptanceCriteria) lines.push(`- [ ] ${ac}`);

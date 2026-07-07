@@ -134,6 +134,17 @@ export class GithubTicketProvider implements TicketProvider {
     return this.setStatus(key, 'In progress');
   }
 
+  async amend(key: string, patch: Partial<Ticket>): Promise<StoredTicket> {
+    const current = await this.get(key);
+    if (!current) throw new Error(`issue ${key} not found`);
+    const merged: StoredTicket = { ...current, ...patch, key, slug: current.slug };
+    const bodyFile = writeTempBody(serializeBody(merged));
+    const args = ['gh', 'issue', 'edit', key, '--body-file', bodyFile, ...this.repoArgs()];
+    if (patch.title) args.push('--title', patch.title);
+    execMutate(args, this.opts.dryRun);
+    return merged;
+  }
+
   async delete(key: string): Promise<void> {
     execMutate(['gh', 'issue', 'delete', key, '--yes', ...this.repoArgs()], this.opts.dryRun);
   }

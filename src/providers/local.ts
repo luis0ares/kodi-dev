@@ -156,6 +156,14 @@ export class LocalTicketProvider implements TicketProvider {
     return this.setStatus(key, 'In progress');
   }
 
+  async amend(key: string, patch: Partial<Ticket>): Promise<StoredTicket> {
+    const found = this.locate(key);
+    if (!found) throw new Error(`ticket ${key} not found`);
+    const ticket: StoredTicket = { ...found.ticket, ...patch, key, slug: found.ticket.slug };
+    this.persist(ticket);
+    return ticket;
+  }
+
   async delete(key: string): Promise<void> {
     const found = this.locate(key);
     if (!found) throw new Error(`ticket ${key} not found`);
@@ -195,6 +203,7 @@ function sortTicket(t: StoredTicket) {
     summary: t.summary,
     acceptanceCriteria: t.acceptanceCriteria,
     nonGoals: t.nonGoals,
+    ...(t.prUrl ? { prUrl: t.prUrl } : {}),
     ...(t.notes ? { notes: t.notes } : {}),
   };
 }
