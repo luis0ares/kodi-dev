@@ -2,9 +2,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 
-export type ProviderName = 'local' | 'azure';
+export type ProviderName = 'local' | 'github' | 'azure';
 
-/** The Azure board column mapping, discovered/confirmed by `kodi init`. */
+/** The board column mapping (Azure states / GitHub Projects Status options), discovered/confirmed by `kodi init`. */
 export interface ColumnMap {
   /** Column a new issue lands in (e.g. "To Do"). */
   todo: string;
@@ -21,9 +21,13 @@ export interface BoardConfig {
   organization?: string;
   /** Azure project name. */
   project?: string;
-  /** Azure repository name (for PRs). */
+  /** Repository for PRs (Azure: bare name; GitHub: `owner/repo`, also where issues are created). */
   repository?: string;
-  /** Azure board status→column map. */
+  /** GitHub Projects v2 owner login (org or user) that owns the board. */
+  projectOwner?: string;
+  /** GitHub Projects v2 board number. */
+  projectNumber?: number;
+  /** Board status→column map (Azure states / GitHub Status options). */
   columns?: ColumnMap;
 }
 
