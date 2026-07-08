@@ -2,7 +2,7 @@
 PKG := $(shell node -p "require('./package.json').name")
 
 .DEFAULT_GOAL := help
-.PHONY: help deps build test typecheck lint check install uninstall reinstall dev clean
+.PHONY: help deps build build-board test typecheck lint check install uninstall reinstall dev clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -12,7 +12,10 @@ deps: ## Install dependencies (CLI + self-contained board)
 	pnpm install
 	pnpm -C board install
 
-build: ## Compile the CLI to dist/
+build-board: ## Build the self-contained board app and bundle it into board-dist/
+	pnpm build:board
+
+build: ## Build the board app (bundled into board-dist/) + compile the CLI to dist/
 	pnpm build
 
 test: ## Run the test suite
@@ -26,9 +29,9 @@ lint: ## Lint (ESLint + Prettier check) across src/ + tests/
 
 check: lint typecheck test ## Lint + type-check + test (lint first, fails cheap)
 
-install: build ## Build and install the kodi binary globally from local source
+install: build ## Build board + CLI (board bundled into the package) and install kodi globally
 	npm install -g .
-	@echo "installed $(PKG) — run: kodi --help"
+	@echo "installed $(PKG) — run: kodi --help  ('kodi tickets serve' serves the bundled board)"
 
 uninstall: ## Remove the globally installed kodi
 	npm uninstall -g $(PKG)

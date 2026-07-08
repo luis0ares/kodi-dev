@@ -26,8 +26,10 @@ jobs:
           registry-url: https://registry.npmjs.org
           cache: pnpm
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Install dependencies (CLI + self-contained board)
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm -C board install --frozen-lockfile
 
       - name: Type-check
         run: pnpm typecheck
@@ -35,7 +37,7 @@ jobs:
       - name: Test
         run: pnpm test
 
-      - name: Build
+      - name: Build board + CLI (bundles the board into board-dist/)
         run: pnpm build
 
       # On a Release, publish the tag's version (strip a leading "v"), so the npm
