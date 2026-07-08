@@ -14,5 +14,8 @@
 #   - sharp:         Next.js image optimizer native binary
 #   - unrs-resolver: native resolver used by eslint-config-next's import rules
 allowBuilds:
+  # esbuild: vitest's transform pipeline ships an esbuild native binary (test
+  # toolchain only). Mirrors the root workspace's esbuild allowBuild.
+  esbuild: true
   sharp: true
   unrs-resolver: true

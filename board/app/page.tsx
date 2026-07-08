@@ -1,27 +1,33 @@
-export default function Home() {
+import { getBoard } from '@/app/actions/board';
+
+// THROWAWAY render — this exists only to exercise the getBoard() server action
+// on the read path (KODI-009). The real daisyUI Board/Column/Card design-system
+// UI lands in KODI-010; do not build it here.
+export default async function Home() {
+  const board = await getBoard();
+
   return (
-    <main className="hero min-h-screen bg-base-200">
-      <div className="hero-content text-center">
-        <div className="card bg-base-100 shadow-xl">
-          <div className="card-body items-center gap-4">
-            <div className="flex items-center gap-3">
-              <h1 className="card-title text-3xl">kodi board</h1>
-              <span className="badge badge-primary badge-outline">
-                scaffold
-              </span>
-            </div>
-            <p className="max-w-md text-base-content/70">
-              This is a placeholder page. The real ticket board lands in a
-              later slice — for now it just proves the Next.js + daisyUI
-              scaffold renders with the stock light and dark themes.
-            </p>
-            <div className="card-actions">
-              <button className="btn btn-primary" type="button" disabled>
-                Coming soon
-              </button>
-            </div>
-          </div>
-        </div>
+    <main className="min-h-screen bg-base-200 p-8">
+      <h1 className="mb-6 text-2xl font-bold">kodi board (read-path smoke)</h1>
+      <div className="flex flex-wrap gap-6">
+        {board.columns.map((column) => (
+          <section key={column.status} className="min-w-64">
+            <h2 className="mb-2 font-semibold">
+              {column.status} ({column.tickets.length})
+            </h2>
+            {column.tickets.length === 0 ? (
+              <p className="text-base-content/50">No tickets</p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {column.tickets.map((ticket) => (
+                  <li key={ticket.key} className="rounded border p-2">
+                    <span className="font-mono">{ticket.key}</span> — {ticket.title}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        ))}
       </div>
     </main>
   );
