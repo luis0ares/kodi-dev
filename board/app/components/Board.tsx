@@ -184,7 +184,7 @@ export function Board({ model }: { model: BoardModel }) {
 
       {isEmptyBoard && <EmptyBoardHint />}
 
-      <div ref={gridRef} className="grid min-h-0 flex-1 grid-cols-5 gap-4">
+      <div ref={gridRef} className="flex min-h-0 flex-1 gap-4 overflow-x-auto pb-2">
         {model.columns.map((column, i) => (
           <Column
             key={column.status}
