@@ -215,10 +215,16 @@ export function registerServeCommand(program: Command): void {
 
       const env = buildBoardEnv(port, ticketsDir);
 
-      // 4. Spawn async under process.execPath, no shell, stdio inherited so the
-      //    user sees the board's startup output. Normal child (shares the CLI
+      // 4. Spawn async under process.execPath, no shell. The board's STDOUT is
+      //    ignored so Next's standalone startup banner (▲ Next.js / Local /
+      //    Network / ✓ Ready) is suppressed — we print our own single
+      //    "Board running at …" line once it's listening. STDERR stays inherited
+      //    so real board errors still surface. Normal child (shares the CLI
       //    lifecycle) — never detached/unref (that is the orphan pattern).
-      const child = spawn(process.execPath, [serverJs], { env, stdio: 'inherit' });
+      const child = spawn(process.execPath, [serverJs], {
+        env,
+        stdio: ['ignore', 'ignore', 'inherit'],
+      });
 
       // 7/8. Stay foreground: the action promise stays pending while the board
       //      runs and resolves on teardown.
