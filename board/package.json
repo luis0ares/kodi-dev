@@ -11,12 +11,14 @@
     "dev": "NEXT_TELEMETRY_DISABLED=1 next dev",
     "build": "NEXT_TELEMETRY_DISABLED=1 next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "vitest run"
   },
   "dependencies": {
     "next": "16.2.10",
     "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react-dom": "19.2.7",
+    "yaml": "^2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.3.2",
@@ -27,6 +29,7 @@
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.10",
     "tailwindcss": "4.3.2",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "vitest": "^2"
   }
 }
