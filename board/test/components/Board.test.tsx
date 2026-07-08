@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-// Board-level component tests: the five fixed columns + order (R-012), per-column
+// Board-level component tests: the four fixed columns + order (R-012), per-column
 // live count + status color (§4), the in-column vs board-level empty registers
 // (§7 registers 1 & 2), and the read-only invariant (R-014 — no mutation surface,
 // disclosure buttons are the only interactive controls).
@@ -21,8 +21,8 @@ function badgeIn(section: HTMLElement): HTMLElement {
   return badge as HTMLElement;
 }
 
-describe('Board — five fixed columns in enum order (R-012)', () => {
-  it('renders all five verbatim status labels, always, in fixed order', () => {
+describe('Board — four fixed columns in enum order (R-012)', () => {
+  it('renders all four verbatim status labels, always, in fixed order', () => {
     // Some columns populated, some empty — order must NOT follow the data.
     const model = boardWith(
       makeTicket({ key: 'KODI-001', status: 'Pending' }),
@@ -44,9 +44,9 @@ describe('Board — five fixed columns in enum order (R-012)', () => {
     render(<Board model={model} />);
 
     const sections = screen.getAllByRole('group');
-    expect(sections).toHaveLength(5);
+    expect(sections).toHaveLength(4);
 
-    const expectedCounts = ['2', '0', '0', '1', '0'];
+    const expectedCounts = ['2', '0', '0', '1'];
     sections.forEach((section, i) => {
       const heading = within(section).getByRole('heading', { level: 2 });
       expect(heading).toHaveTextContent(ORDERED_LABELS[i]);
@@ -58,8 +58,8 @@ describe('Board — five fixed columns in enum order (R-012)', () => {
     const model = boardWith(makeTicket({ key: 'KODI-001', status: 'Pending' }));
     render(<Board model={model} />);
 
-    // Four empty columns → four in-column placeholders (register 1).
-    expect(screen.getAllByText('No tickets')).toHaveLength(4);
+    // Three empty columns → three in-column placeholders (register 1).
+    expect(screen.getAllByText('No tickets')).toHaveLength(3);
     // The populated Pending column shows no placeholder.
     const pending = screen.getAllByRole('group')[0];
     expect(within(pending).queryByText('No tickets')).toBeNull();
@@ -71,8 +71,8 @@ describe('Board — status → color mapping on the count badge (§4)', () => {
     render(<Board model={emptyBoardModel()} />);
     const sections = screen.getAllByRole('group');
 
-    const badgeColors = ['badge-neutral', 'badge-info', 'badge-warning', 'badge-success', 'badge-error'];
-    const topColors = ['border-t-neutral', 'border-t-info', 'border-t-warning', 'border-t-success', 'border-t-error'];
+    const badgeColors = ['badge-neutral', 'badge-info', 'badge-warning', 'badge-success'];
+    const topColors = ['border-t-neutral', 'border-t-info', 'border-t-warning', 'border-t-success'];
 
     sections.forEach((section, i) => {
       expect(badgeIn(section)).toHaveClass(badgeColors[i]);
@@ -100,12 +100,12 @@ describe('Board — empty-board register (§7 register 2) is distinct from regis
     expect(hint).toHaveTextContent('kodi tickets create');
     // Informational, NOT error-styled — must not look like register 4.
     expect(hint.className).not.toContain('alert-error');
-    // Register 1 placeholders still render in each of the five empty columns.
-    expect(screen.getAllByText('No tickets')).toHaveLength(5);
+    // Register 1 placeholders still render in each of the four empty columns.
+    expect(screen.getAllByText('No tickets')).toHaveLength(4);
   });
 
   it('does NOT show the board-level hint when any column has a ticket', () => {
-    render(<Board model={boardWith(makeTicket({ key: 'KODI-001', status: 'Blocked' }))} />);
+    render(<Board model={boardWith(makeTicket({ key: 'KODI-001', status: 'Done' }))} />);
     expect(screen.queryByText('No tickets yet.')).toBeNull();
     // The board-level hint is absent; the ONLY remaining status region is the
     // always-present KODI-014 announcer (§5.3), which is sr-only and empty at rest.

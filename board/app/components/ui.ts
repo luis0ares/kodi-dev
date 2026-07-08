@@ -13,7 +13,6 @@ export const STATUS_BADGE: Record<TicketStatus, string> = {
   'In progress': 'badge-info',
   'To review': 'badge-warning',
   Done: 'badge-success',
-  Blocked: 'badge-error',
 };
 
 /** Column thin TOP status edge color (§2.2 — accent, not a full fill). */
@@ -22,7 +21,6 @@ export const STATUS_TOP: Record<TicketStatus, string> = {
   'In progress': 'border-t-info',
   'To review': 'border-t-warning',
   Done: 'border-t-success',
-  Blocked: 'border-t-error',
 };
 
 /** Card thin LEFT status edge color (§2.2 — matches the card's column). */
@@ -31,7 +29,6 @@ export const STATUS_LEFT: Record<TicketStatus, string> = {
   'In progress': 'border-l-info',
   'To review': 'border-l-warning',
   Done: 'border-l-success',
-  Blocked: 'border-l-error',
 };
 
 /**
@@ -46,7 +43,6 @@ export const STATUS_ARRIVE: Record<TicketStatus, string> = {
   'In progress': 'arrive-info',
   'To review': 'arrive-warning',
   Done: 'arrive-success',
-  Blocked: 'arrive-error',
 };
 
 /**

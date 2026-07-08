@@ -196,7 +196,7 @@ describe('events route — bare opaque change event (SC-1)', () => {
     // Give the watch a beat, then drive a real atomic write with KODI content in
     // the FILE — the streamed event must still leak none of it.
     await delay(150);
-    atomicWriteStatus(root, statusYaml(ticketEntry('KODI-777', 'Blocked')));
+    atomicWriteStatus(root, statusYaml(ticketEntry('KODI-777', 'To review')));
 
     const changeBytes = await readUntil(reader, 'event: change', 2500);
     expect(changeBytes).toContain('event: change');
@@ -205,7 +205,7 @@ describe('events route — bare opaque change event (SC-1)', () => {
     // SC-1: no ticket content/key/path crosses the wire.
     expect(changeBytes).not.toContain('KODI-777');
     expect(changeBytes).not.toContain('status.yaml');
-    expect(changeBytes.toLowerCase()).not.toContain('blocked');
+    expect(changeBytes.toLowerCase()).not.toContain('review');
 
     ac.abort();
     await reader.cancel().catch(() => undefined);

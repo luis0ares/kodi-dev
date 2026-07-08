@@ -99,7 +99,7 @@ afterEach(() => {
 });
 
 // --- Column addressing (fixed R-012 enum order), identical to LiveBoard.test.tsx.
-const COL = { Pending: 0, 'In progress': 1, 'To review': 2, Done: 3, Blocked: 4 } as const;
+const COL = { Pending: 0, 'In progress': 1, 'To review': 2, Done: 3 } as const;
 function column(label: keyof typeof COL): HTMLElement {
   return screen.getAllByRole('group')[COL[label]];
 }
@@ -338,9 +338,9 @@ describe('KODI-014 — single polite ARIA-live announcer (§5.3)', () => {
   it('combines a MULTI-move burst into ONE message in the SAME single region', async () => {
     const a = makeTicket({ key: 'KODI-001', status: 'Pending' });
     const b = makeTicket({ key: 'KODI-002', status: 'In progress' });
-    // Both move in a single refetched model: A → Done, B → Blocked.
+    // Both move in a single refetched model: A → To review, B → Done.
     getBoardMock.mockResolvedValue(
-      boardWith({ ...a, status: 'Done' }, { ...b, status: 'Blocked' }),
+      boardWith({ ...a, status: 'To review' }, { ...b, status: 'Done' }),
     );
 
     const { container } = renderLive(boardWith(a, b));
@@ -348,9 +348,9 @@ describe('KODI-014 — single polite ARIA-live announcer (§5.3)', () => {
     await move();
 
     // Still exactly one region (liveRegion asserts the count), holding both moves as
-    // a single combined message (column-order: Done then Blocked).
+    // a single combined message (column-order: To review then Done).
     expect(liveRegion(container).textContent).toBe(
-      'KODI-001 moved to Done. KODI-002 moved to Blocked.',
+      'KODI-001 moved to To review. KODI-002 moved to Done.',
     );
   });
 

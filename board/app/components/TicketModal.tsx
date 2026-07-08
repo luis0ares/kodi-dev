@@ -23,10 +23,25 @@ import { STATUS_BADGE, hasText, safeHttpUrl } from './ui';
 
 interface TicketModalProps {
   ticket: BoardTicket;
+  /** True when there is a ticket to return to (we drilled in via a dependency). */
+  canGoBack: boolean;
+  /** Pop the navigation stack — return to the ticket we came from. */
+  onBack: () => void;
   onClose: () => void;
+  /** Resolve a dependency KEY to a real ticket, or undefined when it is unknown. */
+  resolveDependency: (key: string) => BoardTicket | undefined;
+  /** Navigate INTO a dependency ticket (pushes onto the stack). */
+  onOpenDependency: (ticket: BoardTicket) => void;
 }
 
-export function TicketModal({ ticket, onClose }: TicketModalProps) {
+export function TicketModal({
+  ticket,
+  canGoBack,
+  onBack,
+  onClose,
+  resolveDependency,
+  onOpenDependency,
+}: TicketModalProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = `modal-title-${ticket.key}`;
 
@@ -76,6 +91,13 @@ export function TicketModal({ ticket, onClose }: TicketModalProps) {
           ✕
         </button>
 
+        {/* Present only when we drilled in via a dependency — walks the stack back. */}
+        {canGoBack && (
+          <button type="button" onClick={onBack} className="btn btn-ghost btn-xs mb-2 -ml-1">
+            ← Back
+          </button>
+        )}
+
         <header className="flex flex-col gap-2 pr-8">
           <div className="flex items-baseline gap-2">
             <span className="font-mono text-xs break-words opacity-70">{ticket.key}</span>
@@ -90,7 +112,11 @@ export function TicketModal({ ticket, onClose }: TicketModalProps) {
           <p className="mt-3 break-words text-base-content/80">{ticket.summary}</p>
         )}
 
-        <TicketDetails ticket={ticket} />
+        <TicketDetails
+          ticket={ticket}
+          resolveDependency={resolveDependency}
+          onOpenDependency={onOpenDependency}
+        />
       </div>
 
       {/* Clicking outside the box closes the modal (daisyUI backdrop pattern). */}
@@ -102,7 +128,15 @@ export function TicketModal({ ticket, onClose }: TicketModalProps) {
 }
 
 /** The §7 detail rows. Each section is omitted entirely when its value is absent. */
-function TicketDetails({ ticket }: { ticket: BoardTicket }) {
+function TicketDetails({
+  ticket,
+  resolveDependency,
+  onOpenDependency,
+}: {
+  ticket: BoardTicket;
+  resolveDependency: (key: string) => BoardTicket | undefined;
+  onOpenDependency: (ticket: BoardTicket) => void;
+}) {
   const { dependencies, drivers, acceptanceCriteria, prUrl, notes } = ticket;
   const href = safeHttpUrl(prUrl); // security req 2 — scheme allow-list
 
@@ -112,9 +146,27 @@ function TicketDetails({ ticket }: { ticket: BoardTicket }) {
         <section>
           <h3 className="mb-1 font-semibold">Dependencies</h3>
           <ul className="list-inside list-disc break-words">
-            {dependencies.map((dep) => (
-              <li key={dep}>{dep}</li>
-            ))}
+            {dependencies.map((dep) => {
+              // A dependency KEY that resolves to a real card on this board becomes a
+              // link that navigates INTO it (recursive drill-down); an unresolved key
+              // (not on the board) stays plain text — never a dead link.
+              const target = resolveDependency(dep);
+              return (
+                <li key={dep}>
+                  {target ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenDependency(target)}
+                      className="link link-primary break-words"
+                    >
+                      {dep}
+                    </button>
+                  ) : (
+                    dep
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}

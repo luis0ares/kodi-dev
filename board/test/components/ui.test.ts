@@ -75,7 +75,6 @@ describe('status → daisyUI color maps (§4)', () => {
       'In progress': 'badge-info',
       'To review': 'badge-warning',
       Done: 'badge-success',
-      Blocked: 'badge-error',
     });
   });
 
@@ -85,18 +84,16 @@ describe('status → daisyUI color maps (§4)', () => {
       'In progress': 'border-t-info',
       'To review': 'border-t-warning',
       Done: 'border-t-success',
-      Blocked: 'border-t-error',
     });
     expect(STATUS_LEFT).toEqual({
       Pending: 'border-l-neutral',
       'In progress': 'border-l-info',
       'To review': 'border-l-warning',
       Done: 'border-l-success',
-      Blocked: 'border-l-error',
     });
   });
 
-  it('covers exactly the five canonical statuses', () => {
+  it('covers exactly the four canonical statuses', () => {
     expect(Object.keys(STATUS_BADGE).sort()).toEqual([...TICKET_STATUSES].sort());
   });
 

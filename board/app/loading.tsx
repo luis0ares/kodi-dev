@@ -1,5 +1,5 @@
 // Loading register (design-system §7 register 5): a neutral daisyUI `skeleton` of
-// the five column frames — NOT a spinner-only white screen — so the expected board
+// the four column frames — NOT a spinner-only white screen — so the expected board
 // shape is already on screen. Short-lived on a localhost read.
 export default function Loading() {
   return (

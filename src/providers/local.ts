@@ -100,7 +100,7 @@ export class LocalTicketProvider implements TicketProvider {
 
   /**
    * Lazy idempotent scaffold (R-003, ADR-0001 §2.3): ensure `status.yaml` and
-   * the five status folders exist. A valid pre-existing `status.yaml`
+   * the four status folders exist. A valid pre-existing `status.yaml`
    * short-circuits the fresh-index write, so re-running never duplicates or
    * corrupts an existing index. `mkdirSync({recursive:true})` is itself
    * idempotent for the folders.

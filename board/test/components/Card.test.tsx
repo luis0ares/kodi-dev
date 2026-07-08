@@ -41,16 +41,22 @@ async function openModal(ticket = RICH): Promise<HTMLElement> {
 }
 
 describe('Card face — shows ONLY identity + tags (heavy fields deferred to the modal)', () => {
-  it('shows key, title and driver/dependency tags on the card button', () => {
+  it('shows key, title and the dependency-count + security tags on the card button', () => {
     renderCard(RICH);
     const face = screen.getByRole('button');
 
     expect(within(face).getByText('KODI-050')).toBeInTheDocument();
     expect(within(face).getByText('Rich ticket')).toBeInTheDocument();
     expect(within(face).getByText('2 deps')).toBeInTheDocument();
-    expect(within(face).getByText('ADR')).toBeInTheDocument();
-    expect(within(face).getByText('PRD')).toBeInTheDocument();
     expect(within(face).getByText('SEC')).toBeInTheDocument();
+  });
+
+  it('does NOT show ADR/PRD chips on the card face (they live only in the modal)', () => {
+    renderCard(RICH);
+    const face = screen.getByRole('button');
+
+    expect(within(face).queryByText('ADR')).toBeNull();
+    expect(within(face).queryByText('PRD')).toBeNull();
   });
 
   it('keeps the summary and every heavy field OFF the card face', () => {
@@ -196,5 +202,80 @@ describe('prUrl scheme allow-list at the modal render seam (security req 2)', ()
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     expect(link).toHaveClass('link-primary');
+  });
+});
+
+describe('TicketModal — dependency navigation (recursive drill-down + Back)', () => {
+  // A → B → C chain (each depends on the next); A also lists an off-board dep.
+  const A = makeTicket({
+    key: 'KODI-100',
+    title: 'Parent',
+    status: 'Pending',
+    dependencies: ['KODI-101', 'KODI-999'], // 101 is on-board, 999 is not
+  });
+  const B = makeTicket({
+    key: 'KODI-101',
+    title: 'Child',
+    status: 'To review',
+    dependencies: ['KODI-102'],
+  });
+  const C = makeTicket({ key: 'KODI-102', title: 'Grandchild', status: 'Done' });
+
+  /** Render the whole board and open A's modal. */
+  async function openParent() {
+    const user = userEvent.setup();
+    render(<Board model={boardWith(A, B, C)} />);
+    await user.click(screen.getByRole('button', { name: /KODI-100/ }));
+    return user;
+  }
+
+  it('renders a resolvable dependency as a link and an off-board one as plain text', async () => {
+    await openParent();
+    const dialog = screen.getByRole('dialog');
+
+    // KODI-101 is on the board → a clickable control; KODI-999 is not → plain text.
+    expect(within(dialog).getByRole('button', { name: 'KODI-101' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'KODI-999' })).toBeNull();
+    expect(within(dialog).getByText('KODI-999')).toBeInTheDocument();
+    // At the root of the stack there is no Back control yet.
+    expect(within(dialog).queryByRole('button', { name: '← Back' })).toBeNull();
+  });
+
+  it('drills A → B → C, then walks Back to the original ticket', async () => {
+    const user = await openParent();
+    const heading = () =>
+      within(screen.getByRole('dialog')).getByRole('heading', { level: 2 }).textContent;
+
+    expect(heading()).toBe('Parent');
+
+    // Into B.
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'KODI-101' }));
+    expect(heading()).toBe('Child');
+    // Into C (B's dependency).
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'KODI-102' }));
+    expect(heading()).toBe('Grandchild');
+
+    // Back → B, Back → A.
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '← Back' }));
+    expect(heading()).toBe('Child');
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '← Back' }));
+    expect(heading()).toBe('Parent');
+    // Back control is gone again at the root.
+    expect(within(screen.getByRole('dialog')).queryByRole('button', { name: '← Back' })).toBeNull();
+  });
+
+  it('opening a fresh card starts a new stack (no stale Back)', async () => {
+    const user = await openParent();
+    // Drill one level in, then close.
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'KODI-101' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '← Back' }));
+    await user.click(screen.getAllByRole('button', { name: 'Close' })[0]);
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    // Re-open C directly from its card — a fresh stack, so no Back control.
+    await user.click(screen.getByRole('button', { name: /KODI-102/ }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('heading', { level: 2 })).toHaveTextContent('Grandchild');
+    expect(within(dialog).queryByRole('button', { name: '← Back' })).toBeNull();
   });
 });

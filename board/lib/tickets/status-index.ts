@@ -33,7 +33,6 @@ const STATUS_TO_SLUG: Readonly<Record<TicketStatus, string>> = {
   'In progress': 'in-progress',
   'To review': 'to-review',
   Done: 'done',
-  Blocked: 'blocked',
 };
 
 /** One placement record — column + relative pointer, nothing else (§1). */
@@ -66,7 +65,7 @@ function freshTickets(): Record<string, StatusIndexEntry> {
  * yaml v2). The `tickets` map is rebuilt into a null-prototype object; keys are
  * filtered against {@link KEY_RE} (which also drops `__proto__`/`constructor`/
  * `prototype`), and each entry is kept ONLY when it has a string `file` and a
- * `column` that is one of the five canonical statuses (data-model §4: a card is
+ * `column` that is one of the four canonical statuses (data-model §4: a card is
  * only placeable when its index column is valid). Malformed entries are dropped,
  * never trusted. Absent/empty/non-object input → an empty index (ADR-0002 §2.5).
  */

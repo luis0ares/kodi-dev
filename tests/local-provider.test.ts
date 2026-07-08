@@ -296,7 +296,7 @@ describe('local provider — the five transitions each preserve I1–I5 (data-mo
     assertBijection();
   });
 
-  it('end-to-end lifecycle: create → start → hand-off → Done → Blocked → delete stays I1–I5 consistent at every step', async () => {
+  it('end-to-end lifecycle: create → start → hand-off → Done → delete stays I1–I5 consistent at every step', async () => {
     const t = await provider.create(draft());
     assertInvariants(t.key, t.slug, 'Pending');
     assertBijection();
@@ -314,11 +314,6 @@ describe('local provider — the five transitions each preserve I1–I5 (data-mo
     await provider.setStatus(t.key, 'Done');
     assertInvariants(t.key, t.slug, 'Done');
     expect(existsSync(fileAt('To review', t.key, t.slug))).toBe(false);
-    assertBijection();
-
-    await provider.setStatus(t.key, 'Blocked');
-    assertInvariants(t.key, t.slug, 'Blocked');
-    expect(existsSync(fileAt('Done', t.key, t.slug))).toBe(false);
     assertBijection();
 
     await provider.delete(t.key);

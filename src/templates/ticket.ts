@@ -6,7 +6,7 @@ import { z } from 'zod';
  * template: the typed model is the single source of truth for a ticket's shape.
  */
 
-export const TICKET_STATUSES = ['Pending', 'In progress', 'To review', 'Done', 'Blocked'] as const;
+export const TICKET_STATUSES = ['Pending', 'In progress', 'To review', 'Done'] as const;
 
 export const TicketStatusSchema = z.enum(TICKET_STATUSES);
 export type TicketStatus = z.infer<typeof TicketStatusSchema>;

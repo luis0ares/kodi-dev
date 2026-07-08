@@ -95,8 +95,8 @@ afterEach(() => {
   (globalThis as Record<string, unknown>).EventSource = originalEventSource;
 });
 
-/** The five §7 columns render in fixed enum order — index into that order. */
-const COL = { Pending: 0, 'In progress': 1, 'To review': 2, Done: 3, Blocked: 4 } as const;
+/** The four §7 columns render in fixed enum order — index into that order. */
+const COL = { Pending: 0, 'In progress': 1, 'To review': 2, Done: 3 } as const;
 
 /** The section (role="group") for a column, by its fixed render position. */
 function column(label: keyof typeof COL): HTMLElement {

@@ -33,7 +33,7 @@ export const SCHEMA_VERSION = 1 as const;
 
 /** One placement record in `status.yaml` — column + relative pointer, nothing else. */
 export interface StatusIndexEntry {
-  /** Authoritative column placement (one of the five statuses). */
+  /** Authoritative column placement (one of the four statuses). */
   column: TicketStatus;
   /** POSIX-relative pointer `<folder-slug>/<KEY>-<slug>.md` (relative to the tickets root). */
   file: string;
@@ -43,7 +43,7 @@ export interface StatusIndexEntry {
 export interface StatusIndexDocument {
   /** Integer schema version. */
   version: number;
-  /** Ordered canonical list of the five status strings (render order + empty-column presence). */
+  /** Ordered canonical list of the four status strings (render order + empty-column presence). */
   columns: TicketStatus[];
   /** Flat map keyed by ticket key → placement record. */
   tickets: Record<string, StatusIndexEntry>;
@@ -62,7 +62,6 @@ const STATUS_TO_SLUG: Readonly<Record<TicketStatus, string>> = {
   'In progress': 'in-progress',
   'To review': 'to-review',
   Done: 'done',
-  Blocked: 'blocked',
 };
 
 /** Inverse of {@link STATUS_TO_SLUG}. */
@@ -125,7 +124,7 @@ export function composeFile(status: TicketStatus, key: string, slug: string): st
   return `${slugForStatus(status)}/${key}-${slug}.md`;
 }
 
-/** A fresh, empty document (`version: 1`, five columns in frozen order, no tickets). */
+/** A fresh, empty document (`version: 1`, four columns in frozen order, no tickets). */
 export function emptyDocument(): StatusIndexDocument {
   return {
     version: SCHEMA_VERSION,

@@ -32,9 +32,8 @@ function stored(over: Record<string, unknown> = {}): StoredTicket {
 const COLS = { todo: 'Todo', inProgress: 'In Progress', toReview: 'In Review', done: 'Done' };
 
 describe('github provider — status ↔ column mapping', () => {
-  it('maps statuses to columns (blocked lands in todo)', () => {
+  it('maps statuses to columns (Pending lands in todo)', () => {
     expect(columnForStatus('Pending', COLS)).toBe('Todo');
-    expect(columnForStatus('Blocked', COLS)).toBe('Todo');
     expect(columnForStatus('In progress', COLS)).toBe('In Progress');
     expect(columnForStatus('To review', COLS)).toBe('In Review');
     expect(columnForStatus('Done', COLS)).toBe('Done');

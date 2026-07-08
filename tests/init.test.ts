@@ -119,9 +119,23 @@ describe('installHarness (files only)', () => {
     }
     expect(existsSync(join(dir, '.claude/rules/ticket-completion.md'))).toBe(true);
     expect(existsSync(join(dir, 'docs/adr'))).toBe(true);
+    // Default provider is local → the local ticket store IS scaffolded.
+    expect(existsSync(join(dir, 'docs/tickets'))).toBe(true);
     // the board state file is NOT written by installHarness (the wizard writes it)
     expect(existsSync(join(dir, '.claude/kodi-dev.yaml'))).toBe(false);
   });
+
+  it.each(['github', 'azure'] as const)(
+    'does NOT scaffold docs/tickets for the %s provider (remote board owns its tickets)',
+    (provider) => {
+      installHarness(dir, { assetsDir: REPO_ASSETS, provider });
+      // Remote board: no local ticket store…
+      expect(existsSync(join(dir, 'docs/tickets'))).toBe(false);
+      // …but the provider-independent docs scaffold is still installed.
+      expect(existsSync(join(dir, 'docs/adr'))).toBe(true);
+      expect(existsSync(join(dir, 'docs/prd'))).toBe(true);
+    },
+  );
 });
 
 describe('normalizeOrgUrl', () => {

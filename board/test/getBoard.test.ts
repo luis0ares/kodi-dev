@@ -37,19 +37,17 @@ describe('getBoard() — happy path & fixed column order (scenario 1)', () => {
         ticketEntry('KODI-001', 'Pending'),
         ticketEntry('KODI-002', 'In progress'),
         ticketEntry('KODI-003', 'To review'),
-        ticketEntry('KODI-004', 'Blocked'),
         ticketEntry('KODI-005', 'Pending'),
       ),
     );
     writeTicketFile(root, { key: 'KODI-001', column: 'Pending', title: 'First', summary: 'one' });
     writeTicketFile(root, { key: 'KODI-002', column: 'In progress', title: 'Second', summary: 'two' });
     writeTicketFile(root, { key: 'KODI-003', column: 'To review', title: 'Third', summary: 'three' });
-    writeTicketFile(root, { key: 'KODI-004', column: 'Blocked', title: 'Fourth', summary: 'four' });
     writeTicketFile(root, { key: 'KODI-005', column: 'Pending', title: 'Fifth', summary: 'five' });
     setEnv(root);
   });
 
-  it('returns exactly the five statuses in fixed enum order', async () => {
+  it('returns exactly the four statuses in fixed enum order', async () => {
     const model = await getBoard();
     expect(model.columns.map((c) => c.status)).toEqual([...TICKET_STATUSES]);
   });
@@ -59,7 +57,6 @@ describe('getBoard() — happy path & fixed column order (scenario 1)', () => {
     expect(keysIn(model, 'Pending').sort()).toEqual(['KODI-001', 'KODI-005']);
     expect(keysIn(model, 'In progress')).toEqual(['KODI-002']);
     expect(keysIn(model, 'To review')).toEqual(['KODI-003']);
-    expect(keysIn(model, 'Blocked')).toEqual(['KODI-004']);
   });
 
   it('represents an unindexed column as an empty array, not a missing column', async () => {
@@ -81,12 +78,12 @@ describe('getBoard() — happy path & fixed column order (scenario 1)', () => {
 describe('getBoard() — index-wins placement (scenario 2, CRITICAL)', () => {
   beforeEach(() => {
     root = makeTicketsRoot();
-    // Index says Blocked; the file's frontmatter status says Pending. The file
-    // MUST physically live under blocked/ (I2) with a KODI-010 name (I4).
-    writeStatusYaml(root, statusYaml(ticketEntry('KODI-010', 'Blocked')));
+    // Index says Done; the file's frontmatter status says Pending. The file
+    // MUST physically live under done/ (I2) with a KODI-010 name (I4).
+    writeStatusYaml(root, statusYaml(ticketEntry('KODI-010', 'Done')));
     writeTicketFile(root, {
       key: 'KODI-010',
-      column: 'Blocked', // controls the on-disk folder/filename
+      column: 'Done', // controls the on-disk folder/filename
       status: 'Pending', // stale frontmatter that must be ignored
       title: 'Disagreeing card',
       summary: 'index and frontmatter disagree',
@@ -94,16 +91,16 @@ describe('getBoard() — index-wins placement (scenario 2, CRITICAL)', () => {
     setEnv(root);
   });
 
-  it('places the card in the INDEX column (Blocked), never the frontmatter one (Pending)', async () => {
+  it('places the card in the INDEX column (Done), never the frontmatter one (Pending)', async () => {
     const model = await getBoard();
-    expect(keysIn(model, 'Blocked')).toEqual(['KODI-010']);
+    expect(keysIn(model, 'Done')).toEqual(['KODI-010']);
     expect(keysIn(model, 'Pending')).toEqual([]);
   });
 
   it('exposes card.status equal to the index column, not the frontmatter status', async () => {
     const model = await getBoard();
-    const card = model.columns.find((c) => c.status === 'Blocked')?.tickets[0];
-    expect(card?.status).toBe('Blocked');
+    const card = model.columns.find((c) => c.status === 'Done')?.tickets[0];
+    expect(card?.status).toBe('Done');
   });
 });
 

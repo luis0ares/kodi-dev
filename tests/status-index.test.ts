@@ -48,24 +48,23 @@ describe('status-index — constants & frozen slug map (SR-1, data-model §3)', 
     expect(SCHEMA_VERSION).toBe(1);
   });
 
-  it('slugForStatus maps all five statuses to their frozen slug', () => {
+  it('slugForStatus maps all four statuses to their frozen slug', () => {
     expect(slugForStatus('Pending')).toBe('pending');
     expect(slugForStatus('In progress')).toBe('in-progress');
     expect(slugForStatus('To review')).toBe('to-review');
     expect(slugForStatus('Done')).toBe('done');
-    expect(slugForStatus('Blocked')).toBe('blocked');
   });
 
-  it('statusForSlug inverts all five slugs', () => {
+  it('statusForSlug inverts all four slugs', () => {
     expect(statusForSlug('pending')).toBe('Pending');
     expect(statusForSlug('in-progress')).toBe('In progress');
     expect(statusForSlug('to-review')).toBe('To review');
     expect(statusForSlug('done')).toBe('Done');
-    expect(statusForSlug('blocked')).toBe('Blocked');
   });
 
-  it('statusForSlug returns undefined for legacy/unknown slugs', () => {
+  it('statusForSlug returns undefined for legacy/removed/unknown slugs', () => {
     expect(statusForSlug('backlog')).toBeUndefined();
+    expect(statusForSlug('blocked')).toBeUndefined(); // Blocked was removed (4-status model)
     expect(statusForSlug('Pending')).toBeUndefined();
     expect(statusForSlug('')).toBeUndefined();
     expect(statusForSlug('nope')).toBeUndefined();
@@ -84,9 +83,6 @@ describe('status-index — composeFile (data-model §2, SR-1)', () => {
       'to-review/KODI-001-add-dataset-import.md',
     );
     expect(composeFile('Pending', 'KODI-007', 'export-csv')).toBe('pending/KODI-007-export-csv.md');
-    expect(composeFile('Blocked', 'KODI-002', 'parse-headers')).toBe(
-      'blocked/KODI-002-parse-headers.md',
-    );
     expect(composeFile('In progress', 'KODI-010', 'x')).toBe('in-progress/KODI-010-x.md');
     expect(composeFile('Done', 'ABC-42', 'a1-b2')).toBe('done/ABC-42-a1-b2.md');
   });
@@ -146,12 +142,12 @@ describe('status-index — serialization determinism (headline AC, data-model §
   it('is insertion-order independent: two build orders yield the identical string', () => {
     const a = docWith([
       { key: 'KODI-010', column: 'Pending', slug: 'ten' },
-      { key: 'KODI-002', column: 'Blocked', slug: 'two' },
+      { key: 'KODI-002', column: 'Done', slug: 'two' },
       { key: 'KODI-001', column: 'To review', slug: 'one' },
     ]);
     const b = docWith([
       { key: 'KODI-001', column: 'To review', slug: 'one' },
-      { key: 'KODI-002', column: 'Blocked', slug: 'two' },
+      { key: 'KODI-002', column: 'Done', slug: 'two' },
       { key: 'KODI-010', column: 'Pending', slug: 'ten' },
     ]);
     expect(serialize(a)).toBe(serialize(b));
@@ -159,7 +155,7 @@ describe('status-index — serialization determinism (headline AC, data-model §
 
   it('round-trips: parse(serialize(doc)) preserves the normalized doc', () => {
     const doc = docWith([
-      { key: 'KODI-002', column: 'Blocked', slug: 'parse-headers' },
+      { key: 'KODI-002', column: 'Done', slug: 'parse-headers' },
       { key: 'KODI-001', column: 'To review', slug: 'add-dataset-import' },
     ]);
     const back = parse(serialize(doc));
@@ -176,7 +172,7 @@ describe('status-index — serialization determinism (headline AC, data-model §
     expect(text).not.toContain('\\');
   });
 
-  it('format: version 1 and the five columns in frozen order', () => {
+  it('format: version 1 and the four columns in frozen order', () => {
     const text = serialize(emptyDocument());
     expect(text).toContain('version: 1');
     const order = TICKET_STATUSES.map((s) => text.indexOf(s));
@@ -196,13 +192,13 @@ describe('status-index — serialization determinism (headline AC, data-model §
   it('matches the data-model §7 example shape for a known small doc', () => {
     const doc = docWith([
       { key: 'KODI-001', column: 'To review', slug: 'add-dataset-import' },
-      { key: 'KODI-002', column: 'Blocked', slug: 'parse-headers' },
+      { key: 'KODI-002', column: 'Done', slug: 'parse-headers' },
       { key: 'KODI-007', column: 'Pending', slug: 'export-csv' },
     ]);
     const text = serialize(doc);
     expect(text).toContain('column: To review');
     expect(text).toContain('file: to-review/KODI-001-add-dataset-import.md');
-    expect(text).toContain('file: blocked/KODI-002-parse-headers.md');
+    expect(text).toContain('file: done/KODI-002-parse-headers.md');
     expect(text).toContain('file: pending/KODI-007-export-csv.md');
   });
 });
@@ -301,7 +297,7 @@ describe('status-index — parse safety (SR-3)', () => {
   it('drops __proto__/constructor keys and does not pollute Object.prototype', () => {
     const text = [
       'version: 1',
-      'columns: [Pending, In progress, To review, Done, Blocked]',
+      'columns: [Pending, In progress, To review, Done]',
       'tickets:',
       '  __proto__:',
       '    column: Pending',
@@ -363,7 +359,7 @@ describe('status-index — parse safety (SR-3)', () => {
 describe('status-index — load / save disk round-trip (mkdtemp, SR-5)', () => {
   it('save then load returns an equal document', () => {
     const doc = docWith([
-      { key: 'KODI-002', column: 'Blocked', slug: 'parse-headers' },
+      { key: 'KODI-002', column: 'Done', slug: 'parse-headers' },
       { key: 'KODI-001', column: 'To review', slug: 'add-dataset-import' },
     ]);
     save(statusYaml, doc);

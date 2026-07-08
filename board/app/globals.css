@@ -38,9 +38,6 @@
 .kodi-arriving.arrive-success {
   --kodi-arrive-color: var(--color-success);
 }
-.kodi-arriving.arrive-error {
-  --kodi-arrive-color: var(--color-error);
-}
 
 /*
  * §5.6 — honor prefers-reduced-motion: DROP the pulse MOTION but KEEP a brief static

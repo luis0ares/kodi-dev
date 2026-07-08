@@ -26,10 +26,11 @@ interface CardProps {
 
 export function Card({ ticket, arriving, onOpen }: CardProps) {
   const depCount = ticket.dependencies.length;
-  const hasAdr = ticket.drivers.adr.length > 0;
-  const hasPrd = hasText(ticket.drivers.prd);
   const hasSec = hasText(ticket.drivers.security);
-  const hasMeta = depCount > 0 || hasAdr || hasPrd || hasSec;
+  // ADR/PRD chips were dropped from the card face (they read as noise on every
+  // card); the full driver references still live in the detail modal. The face
+  // keeps only the dependency count and the security chip.
+  const hasMeta = depCount > 0 || hasSec;
 
   return (
     // Thin LEFT status edge (accent only, §2.2), lighter card surface over the slate
@@ -57,8 +58,6 @@ export function Card({ ticket, arriving, onOpen }: CardProps) {
         {hasMeta && (
           <span className="flex flex-wrap gap-1">
             {depCount > 0 && <span className="badge badge-sm badge-ghost">{depCount} deps</span>}
-            {hasAdr && <span className="badge badge-sm badge-outline">ADR</span>}
-            {hasPrd && <span className="badge badge-sm badge-outline">PRD</span>}
             {hasSec && <span className="badge badge-sm badge-outline">SEC</span>}
           </span>
         )}

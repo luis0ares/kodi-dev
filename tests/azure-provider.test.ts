@@ -50,7 +50,6 @@ describe('azure provider — command construction', () => {
   it('maps statuses to board columns via the column map', () => {
     const cols = { todo: 'To Do', inProgress: 'Doing', toReview: 'Review', done: 'Done' };
     expect(columnForStatus('Pending', cols)).toBe('To Do');
-    expect(columnForStatus('Blocked', cols)).toBe('To Do'); // blocked also lands in todo
     expect(columnForStatus('In progress', cols)).toBe('Doing');
     expect(columnForStatus('To review', cols)).toBe('Review');
     expect(DEFAULT_COLUMNS.todo).toBe('To Do');

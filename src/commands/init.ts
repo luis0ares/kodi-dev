@@ -109,6 +109,12 @@ function copyMarkdownFlat(
 export interface InstallOptions {
   force?: boolean;
   assetsDir?: string;
+  /**
+   * The configured board provider. `docs/tickets/` is the LOCAL provider's ticket
+   * store; a remote board (github/azure) keeps its tickets on the remote, so we do
+   * NOT scaffold `docs/tickets/` for those providers. Defaults to `local`.
+   */
+  provider?: 'local' | 'github' | 'azure';
 }
 
 /** Install the kodi harness FILES (hook, agents, skills, docs scaffold). */
@@ -134,7 +140,13 @@ export function installHarness(root: string, opts: InstallOptions = {}): string[
     ...copyTree(join(assetsDir, 'rules'), join(claude, 'rules'), force, '.claude/rules'),
   );
 
-  for (const sub of ['prd', 'adr', 'diagrams', 'plan', 'tickets', 'security']) {
+  // `tickets` is the LOCAL provider's on-disk ticket store — remote boards
+  // (github/azure) keep their tickets on the remote, so it is scaffolded ONLY for
+  // the local provider. The rest of the docs scaffold is provider-independent.
+  const provider = opts.provider ?? 'local';
+  const docsSubs = ['prd', 'adr', 'diagrams', 'plan', 'security'];
+  if (provider === 'local') docsSubs.push('tickets');
+  for (const sub of docsSubs) {
     mkdirSync(join(root, 'docs', sub), { recursive: true });
   }
 
@@ -484,7 +496,7 @@ export function registerInitCommand(program: Command) {
         prompter.close();
       }
 
-      const changed = installHarness(root, { force: o.force });
+      const changed = installHarness(root, { force: o.force, provider: config.provider });
       const statePath = writeState(root, config);
       process.stdout.write(
         `\nkodi init: installed\n${changed.map((c) => `  + ${c}`).join('\n')}\n` +

@@ -295,7 +295,7 @@ export function registerServeCommand(program: Command): void {
           .then(() => {
             if (settled) return;
             const url = `http://127.0.0.1:${port}`;
-            process.stdout.write(`Board running at ${url}\n`);
+            process.stdout.write(`Board running at ${url}. To stop the server, press Ctrl+C.\n`);
             // KODI_NO_OPEN lets CI/integration tests disable the real browser
             // pop without mocking; the URL is still printed above.
             if (process.env.KODI_NO_OPEN) {

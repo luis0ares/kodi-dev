@@ -11,13 +11,7 @@ import type { BoardModel, BoardTicket } from '@/lib/tickets/types';
 import { TICKET_STATUSES } from '@/lib/tickets/types';
 
 /** The verbatim §8 column labels in their fixed R-012 render order. */
-export const ORDERED_LABELS = [
-  'Pending',
-  'In progress',
-  'To review',
-  'Done',
-  'Blocked',
-] as const;
+export const ORDERED_LABELS = ['Pending', 'In progress', 'To review', 'Done'] as const;
 
 /** A minimal, valid §7 card (no optional fields set). Fully overridable. */
 export function makeTicket(overrides: Partial<BoardTicket> = {}): BoardTicket {

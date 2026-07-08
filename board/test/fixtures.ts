@@ -16,10 +16,9 @@ export const SLUG: Readonly<Record<TicketStatus, string>> = {
   'In progress': 'in-progress',
   'To review': 'to-review',
   Done: 'done',
-  Blocked: 'blocked',
 };
 
-/** Create a fresh, empty tickets root and pre-create the five column folders. */
+/** Create a fresh, empty tickets root and pre-create the four column folders. */
 export function makeTicketsRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'kodi-board-'));
   for (const slug of Object.values(SLUG)) {
@@ -57,7 +56,7 @@ export function ticketEntry(
 export function statusYaml(...entries: string[]): string {
   return (
     'version: 1\n' +
-    'columns: [Pending, In progress, To review, Done, Blocked]\n' +
+    'columns: [Pending, In progress, To review, Done]\n' +
     'tickets:\n' +
     entries.join('')
   );

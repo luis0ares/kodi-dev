@@ -10,7 +10,7 @@
 // stays keyed by ticket.key so it survives a move (§5.4). Nothing here touches the
 // SSE transport (that is LiveBoard) or adds a field to the model.
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { BoardModel, BoardTicket, TicketStatus } from '@/lib/tickets/types';
 import { Column } from './Column';
 import { TicketModal } from './TicketModal';
@@ -22,10 +22,24 @@ const ARRIVAL_MS = 2000;
 const FLIP_MS = 300;
 
 export function Board({ model }: { model: BoardModel }) {
-  // The ticket whose detail modal is open, or null. A single Board-level dialog
-  // (rendered only while non-null) replaces the old per-card expansion registry —
-  // opening a card is view-state only (R-014), never a mutation.
-  const [selected, setSelected] = useState<BoardTicket | null>(null);
+  // The modal NAVIGATION STACK: the last entry is the ticket currently shown in the
+  // detail dialog; earlier entries are the trail of tickets we drilled in FROM (via
+  // dependency links), so "Back" can walk it recursively (A → dep X → dep Y → …). A
+  // single Board-level dialog (rendered only while the stack is non-empty) replaces
+  // the old per-card expansion registry — opening/navigating is view-state only
+  // (R-014), never a mutation.
+  const [navStack, setNavStack] = useState<BoardTicket[]>([]);
+  const current = navStack.length > 0 ? navStack[navStack.length - 1] : null;
+
+  // key → ticket, across every column, so a dependency KEY on the open ticket can be
+  // resolved to a real card to navigate into (unknown keys stay plain text).
+  const ticketsByKey = useMemo(() => {
+    const map = new Map<string, BoardTicket>();
+    for (const column of model.columns) {
+      for (const ticket of column.tickets) map.set(ticket.key, ticket);
+    }
+    return map;
+  }, [model]);
 
   // Ephemeral arrival-highlight state (§5.2): a Set of ticket.key values currently
   // pulsing, each cleared by its own ~2s timer. This is VIEW state only — there is NO
@@ -183,14 +197,25 @@ export function Board({ model }: { model: BoardModel }) {
             column={column}
             headingId={`col-heading-${i}`}
             arrivingKeys={arrivingKeys}
-            onOpen={setSelected}
+            // Opening a card from the board STARTS a fresh navigation stack.
+            onOpen={(ticket) => setNavStack([ticket])}
           />
         ))}
       </div>
 
-      {/* The ONE detail dialog for the whole board — mounted only while a ticket is
-          selected, so a board with nothing open has no dialog in the DOM. */}
-      {selected && <TicketModal ticket={selected} onClose={() => setSelected(null)} />}
+      {/* The ONE detail dialog for the whole board — mounted only while the stack is
+          non-empty, so a board with nothing open has no dialog in the DOM. Dependency
+          links push onto the stack; Back pops it; Close clears it. */}
+      {current && (
+        <TicketModal
+          ticket={current}
+          canGoBack={navStack.length > 1}
+          onBack={() => setNavStack((stack) => stack.slice(0, -1))}
+          onClose={() => setNavStack([])}
+          resolveDependency={(key) => ticketsByKey.get(key)}
+          onOpenDependency={(ticket) => setNavStack((stack) => [...stack, ticket])}
+        />
+      )}
     </main>
   );
 }

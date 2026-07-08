@@ -114,7 +114,7 @@ describe('buildBoard() — path-containment degradation, siblings survive (scena
       root,
       statusYaml(
         ticketEntry('KODI-001', 'Pending', { file: '../../../etc/passwd' }), // SR-1 escape
-        ticketEntry('KODI-002', 'Pending', { file: 'blocked/KODI-002-x.md' }), // I2 mismatch
+        ticketEntry('KODI-002', 'Pending', { file: 'done/KODI-002-x.md' }), // I2 mismatch (folder ≠ column)
         ticketEntry('KODI-003', 'Pending'), // valid sibling
       ),
     );

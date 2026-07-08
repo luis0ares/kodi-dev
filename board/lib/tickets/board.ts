@@ -3,7 +3,7 @@
 // Given the tickets root (KODI_TICKETS_DIR), reads `status.yaml` for placement
 // (index-wins, data-model §4), resolves each `entry.file` with containment
 // (SR-1/SR-2), reads + projects each ticket file's frontmatter to §7 (SR-5), and
-// returns the five-column board. Every consumed value is index-authoritative for
+// returns the four-column board. Every consumed value is index-authoritative for
 // placement/status; frontmatter contributes content only.
 //
 // Robustness (SR-3): each entry is resolved/read/projected in its OWN try/catch —
@@ -30,7 +30,7 @@ import {
   type TicketStatus,
 } from './types';
 
-/** The five columns in fixed enum order, all empty (ADR-0002 §2.5, R-012). */
+/** The four columns in fixed enum order, all empty (ADR-0002 §2.5, R-012). */
 function emptyColumns(): { model: BoardModel; byStatus: Map<TicketStatus, BoardColumn> } {
   const byStatus = new Map<TicketStatus, BoardColumn>();
   const columns: BoardColumn[] = TICKET_STATUSES.map((status) => {
@@ -107,7 +107,7 @@ function buildCard(
  *
  * @param dir the tickets root (KODI_TICKETS_DIR). Absent/empty/whitespace, a
  *            missing dir, or an absent/oversize/malformed status.yaml all yield
- *            the five empty columns (SR-7, ADR-0002 §2.5).
+ *            the four empty columns (SR-7, ADR-0002 §2.5).
  */
 export function buildBoard(dir: string | undefined | null): BoardModel {
   const { model, byStatus } = emptyColumns();

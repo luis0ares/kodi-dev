@@ -106,7 +106,7 @@ describe('resolveContainedFile — SR-1 lexical containment + I2/I4 (scenario 4)
     { name: 'empty segment', key: 'KODI-001', entry: { column: 'Pending', file: 'pending//KODI-001-x.md' } },
     { name: 'too many segments', key: 'KODI-001', entry: { column: 'Pending', file: 'pending/sub/KODI-001-x.md' } },
     { name: 'too few segments', key: 'KODI-001', entry: { column: 'Pending', file: 'KODI-001-x.md' } },
-    { name: 'I2 folder/column mismatch', key: 'KODI-001', entry: { column: 'Pending', file: 'blocked/KODI-001-x.md' } },
+    { name: 'I2 folder/column mismatch', key: 'KODI-001', entry: { column: 'Pending', file: 'done/KODI-001-x.md' } },
     { name: 'I4 key mismatch', key: 'KODI-001', entry: { column: 'Pending', file: 'pending/KODI-002-x.md' } },
     { name: 'malformed filename (no <KEY>- prefix)', key: 'KODI-001', entry: { column: 'Pending', file: 'pending/notes.md' } },
     { name: 'invalid ticket key', key: 'not-a-key', entry: { column: 'Pending', file: 'pending/x.md' } },

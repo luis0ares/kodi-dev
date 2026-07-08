@@ -3,26 +3,22 @@
 // Anchors:
 //  - PRD 0001 §7 "Corrected data contract" — the ONLY ticket fields the board
 //    may read/expose (allow-list, SR-5).
-//  - data-model §1/§3 — the five canonical statuses (Alternative B) and their
-//    fixed order.
+//  - data-model §1/§3 — the four canonical statuses (Alternative B) and their
+//    fixed order. These mirror the columns a remote (github/azure) board is
+//    configured with (to-do/pending, in progress, in review, done) — there is
+//    no "Blocked" status.
 //
 // This module is a leaf (no fs, no yaml) so both the reader and the (future)
 // UI can depend on it without pulling node-only code into the client bundle.
 
 /**
- * The five canonical ticket statuses, in FIXED render order (data-model §1/§3,
+ * The four canonical ticket statuses, in FIXED render order (data-model §1/§3,
  * PRD §7 exact spelling). This is the board's own hardcoded copy of the CLI's
  * `TICKET_STATUSES` — the board is a self-contained project and MUST NOT import
  * across packages (ADR-0002 §2.6). Column order is derived from THIS enum, never
  * from `status.yaml`'s `columns` list (which may be absent — ADR-0002 §2.5).
  */
-export const TICKET_STATUSES = [
-  'Pending',
-  'In progress',
-  'To review',
-  'Done',
-  'Blocked',
-] as const;
+export const TICKET_STATUSES = ['Pending', 'In progress', 'To review', 'Done'] as const;
 
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
 
@@ -67,7 +63,7 @@ export interface BoardColumn {
   tickets: BoardTicket[];
 }
 
-/** The whole board model: always the five columns, in the fixed enum order. */
+/** The whole board model: always the four columns, in the fixed enum order. */
 export interface BoardModel {
   columns: BoardColumn[];
 }

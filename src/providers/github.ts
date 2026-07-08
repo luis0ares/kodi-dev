@@ -33,7 +33,7 @@ export const DEFAULT_COLUMNS: ColumnMap = {
   done: 'Done',
 };
 
-/** Status → board column name (new issues + Blocked land in the todo column). */
+/** Status → board column name (new/Pending issues land in the todo column). */
 export function columnForStatus(status: TicketStatus, cols: ColumnMap): string {
   switch (status) {
     case 'In progress':
