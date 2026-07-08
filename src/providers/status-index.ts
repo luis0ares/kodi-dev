@@ -70,8 +70,8 @@ const SLUG_TO_STATUS: ReadonlyMap<string, TicketStatus> = new Map(
   TICKET_STATUSES.map((status) => [STATUS_TO_SLUG[status], status] as const),
 );
 
-/** Frontmatter `key` shape (SR-1). */
-const KEY_RE = /^[A-Z][A-Z0-9]*-\d+$/;
+/** Frontmatter `key` shape (SR-1). Exported so the legacy-detection guard reuses the same regex. */
+export const KEY_RE = /^[A-Z][A-Z0-9]*-\d+$/;
 /** Strict kebab-case `slug` (SR-1): no `.`/`/`/`\`, no leading/trailing/double hyphen, non-empty. */
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 /** A composed `file`: `<folder-slug>/<KEY>-<slug>.md`. */

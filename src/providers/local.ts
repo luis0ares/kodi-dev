@@ -1,11 +1,14 @@
 import { randomBytes } from 'node:crypto';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   unlinkSync,
   writeFileSync,
+  type Dirent,
 } from 'node:fs';
 import { basename, join } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
@@ -22,6 +25,7 @@ import {
 import {
   composeFile,
   emptyDocument,
+  KEY_RE,
   load,
   remove,
   resolveFile,
@@ -32,6 +36,47 @@ import {
 import type { ReadyResult, StartProvenance, TicketProvider, TicketRef } from './types.js';
 
 const FRONTMATTER = /^---\n([\s\S]*?)\n---\n?/;
+
+/**
+ * Retired legacy layout folders (ADR-0001 §2.2). These are NOT part of
+ * {@link localPaths}; they exist only as the target of the clean-start detection
+ * guard (KODI-006 / data-model §5). Fixed names — never attacker-controlled.
+ */
+const LEGACY_FOLDERS = ['backlog', 'done'] as const;
+
+/** Ticket-shaped filename gate (data-model §5), anchored, applied to the basename only. */
+const LEGACY_FILENAME_RE = /^[A-Z][A-Z0-9]*-\d+-.*\.md$/;
+
+/** Structured refusal payload emitted on both the human and `--json` surfaces. */
+export interface LegacyDataReport {
+  ok: false;
+  reason: 'legacy-data-present';
+  /** Which of the fixed legacy folder names (`backlog`/`done`) are present. */
+  folders: string[];
+  /** Confirmed ticket-shaped file count at short-circuit (>= 1). */
+  ticketCount: number;
+}
+
+/**
+ * Hard-stop, non-destructive clean-start refusal (ADR-0001 §2.6; data-model §5).
+ * Thrown by {@link LocalTicketProvider} before any scaffold write when a legacy
+ * `backlog/`/`done/` layout with ticket-shaped files is detected. Carries a
+ * structured {@link LegacyDataReport} for the `--json` surface and a fixed-string
+ * human message (no attacker-controlled data interpolated — SR-J). The command
+ * layer catches it, renders both surfaces via `out()`, and exits non-zero.
+ */
+export class LegacyDataError extends Error {
+  readonly report: LegacyDataReport;
+
+  constructor(folders: string[], ticketCount: number) {
+    super(
+      `legacy ticket data present under docs/tickets/{${folders.join(', ')}} ` +
+        `(${ticketCount} ticket-shaped file(s)); clean-start refuses to migrate`,
+    );
+    this.name = 'LegacyDataError';
+    this.report = { ok: false, reason: 'legacy-data-present', folders: [...folders], ticketCount };
+  }
+}
 
 /**
  * Local markdown ticket provider. Placement is owned by the authoritative
@@ -61,15 +106,92 @@ export class LocalTicketProvider implements TicketProvider {
    * idempotent for the folders.
    */
   private scaffold() {
-    // legacy-detection insertion point (KODI-006): a detect-and-report guard for
-    // pre-existing backlog/done data goes at the very top here, BEFORE any folder
-    // or status.yaml write. Intentionally not implemented in this slice.
+    // Clean-start guard (KODI-006, ADR-0001 §2.6 / data-model §5): detect a
+    // pre-existing legacy backlog/done layout and HARD-STOP before any write. It
+    // is synchronous and runs at the very top so nothing is scaffolded on the
+    // abort path (SR-A/SR-I).
+    this.detectLegacyData();
     if (!existsSync(this.paths.statusYaml)) {
       save(this.paths.statusYaml, emptyDocument());
     }
     for (const status of TICKET_STATUSES) {
       mkdirSync(this.paths.folderFor(status), { recursive: true });
     }
+  }
+
+  /**
+   * Evaluate the data-model §5 legacy predicate and throw {@link LegacyDataError}
+   * when it holds — non-destructively, before any scaffold write:
+   *
+   *   legacyPresent := !exists(status.yaml)
+   *     AND (exists(backlog/) OR exists(done/))
+   *     AND countTicketShapedMd(backlog/, done/) >= 1
+   *
+   * Security posture (guidance pass): zero writes on this path (SR-A); FAILS SAFE
+   * — any error while *determining* presence aborts-and-reports rather than
+   * falling through to scaffold writes (SR-B); a per-file parse/read failure is a
+   * legitimate "not ticket-shaped" and never crashes (SR-C). It short-circuits at
+   * the first confirmed ticket-shaped file (SR-H).
+   */
+  private detectLegacyData(): void {
+    // SR-F: single consistent status.yaml gate — the same path the scaffold
+    // short-circuit uses. A valid/adopted model skips the check entirely.
+    if (existsSync(this.paths.statusYaml)) return;
+
+    // Gate 2: which legacy folders are present, classified safely (SR-E).
+    const states = LEGACY_FOLDERS.map((name) => ({ name, state: this.legacyDirState(name) }));
+    const present = states.filter((s) => s.state !== 'absent');
+    if (present.length === 0) return; // neither backlog/ nor done/ → predicate false → proceed
+    const folders = present.map((s) => s.name);
+
+    // SR-B/SR-E: a legacy folder we cannot safely enumerate (symlink, stat/perm
+    // failure) means we cannot rule out legacy data → fail safe to abort.
+    if (present.some((s) => s.state === 'unsafe')) {
+      throw new LegacyDataError(folders, 1);
+    }
+
+    // Gate 3: countTicketShapedMd >= 1, short-circuiting at the first hit (SR-H).
+    for (const { name, state } of states) {
+      if (state !== 'dir') continue;
+      const dir = join(this.paths.root, name);
+      let entries: Dirent[];
+      try {
+        // SR-E: enumerate with dirents; count REGULAR FILES only, never follow symlinks.
+        entries = readdirSync(dir, { withFileTypes: true });
+      } catch {
+        // SR-B: cannot enumerate → cannot determine presence → fail safe to abort.
+        throw new LegacyDataError(folders, 1);
+      }
+      for (const dirent of entries) {
+        if (!dirent.isFile()) continue; // SR-E: regular files only (skip dirs/symlinks)
+        if (!LEGACY_FILENAME_RE.test(dirent.name)) continue; // filename gate, basename, anchored
+        if (legacyFileHasKey(join(dir, dirent.name))) {
+          throw new LegacyDataError(folders, 1); // SR-H: first confirmed ticket → stop
+        }
+      }
+    }
+    // Legacy folder(s) exist but hold no ticket-shaped md → not legacy → proceed
+    // (data-model §5 edge case: empty / stray non-ticket files).
+  }
+
+  /**
+   * Classify a candidate legacy folder without following symlinks (SR-E). Uses
+   * `lstat` so a symlinked `backlog/`/`done/` is flagged `unsafe` (never followed
+   * out of tree); a missing folder is `absent`; a stat/permission failure is
+   * `unsafe` (SR-B fail-safe); a real directory is `dir`.
+   */
+  private legacyDirState(name: string): 'absent' | 'dir' | 'unsafe' {
+    const dir = join(this.paths.root, name);
+    let st: ReturnType<typeof lstatSync>;
+    try {
+      st = lstatSync(dir);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return 'absent';
+      return 'unsafe';
+    }
+    if (st.isSymbolicLink()) return 'unsafe';
+    if (!st.isDirectory()) return 'absent'; // a non-dir entry named backlog/done is not the folder
+    return 'dir';
   }
 
   private parseFile(path: string): StoredTicket | null {
@@ -257,6 +379,35 @@ export class LocalTicketProvider implements TicketProvider {
     save(this.paths.statusYaml, doc);
     unlinkSync(found.path);
   }
+}
+
+/**
+ * Ticket-shaped frontmatter test for the legacy guard (data-model §5): the file
+ * parses with a frontmatter `key` matching {@link KEY_RE}. Deliberately NOT
+ * `parseFile`/`TicketSchema.safeParse` — that under-counts and would be a bypass
+ * (SR-D). Parses the frontmatter with the default SAFE yaml schema (no custom
+ * tags/reviver/merge) WRAPPED in try/catch, and treats any read/parse failure as
+ * "not ticket-shaped" rather than crashing (SR-C) — distinct from a directory
+ * enumeration failure, which fails safe to abort in {@link LocalTicketProvider}.
+ */
+function legacyFileHasKey(path: string): boolean {
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf-8');
+  } catch {
+    return false; // per-file read error → not ticket-shaped (must not crash)
+  }
+  const m = FRONTMATTER.exec(raw); // reuse the existing frontmatter regex (SR-G)
+  if (!m) return false;
+  let meta: unknown;
+  try {
+    meta = parseYaml(m[1]); // SR-C: default safe schema; wrapped (parseFile does NOT wrap)
+  } catch {
+    return false; // malformed frontmatter → not ticket-shaped, not a crash
+  }
+  if (meta === null || typeof meta !== 'object') return false;
+  const key = (meta as Record<string, unknown>).key;
+  return typeof key === 'string' && KEY_RE.test(key); // SR-D: `key` present + matches KEY_RE
 }
 
 function toRef(t: StoredTicket): TicketRef {

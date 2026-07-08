@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
+import { LegacyDataError, type LegacyDataReport } from '../providers/local.js';
 import { resolveProvider } from '../providers/index.js';
 import {
   TicketSchema,
@@ -56,8 +57,21 @@ export function registerTicketsCommand(program: Command) {
     .option('--json', 'machine-readable output', false)
     .action(async (o) => {
       const draft = draftFromOptions(o);
-      const created = await resolveProvider(process.cwd(), { yes: o.yes }).create(draft);
-      out(created, o.json, () => `Created ${created.key} (${created.status}) — ${created.title}`);
+      try {
+        const created = await resolveProvider(process.cwd(), { yes: o.yes }).create(draft);
+        out(created, o.json, () => `Created ${created.key} (${created.status}) — ${created.title}`);
+      } catch (err) {
+        // Clean-start hard stop (ADR-0001 §2.6): render the refusal on BOTH the
+        // human and structured `--json` surfaces via out(), then exit non-zero.
+        // Do NOT rethrow — the generic index.ts catch only writes stderr and would
+        // miss the machine-readable surface.
+        if (err instanceof LegacyDataError) {
+          out(err.report, o.json, () => renderLegacyRefusal(err.report));
+          process.exitCode = 1;
+          return;
+        }
+        throw err;
+      }
     });
 
   tickets
@@ -227,6 +241,22 @@ export function registerTicketsCommand(program: Command) {
 
 function collect(value: string, previous: string[]): string[] {
   return previous.concat([value]);
+}
+
+/**
+ * Human-readable clean-start refusal. Built only from the fixed folder names and
+ * the numeric count in the report (SR-J: no attacker-controlled filenames or
+ * frontmatter interpolated). Names the folders + count, states clean-start will
+ * not migrate, and instructs the user how to proceed.
+ */
+function renderLegacyRefusal(report: LegacyDataReport): string {
+  const list = report.folders.map((f) => `docs/tickets/${f}`).join(' and ');
+  const files = `${report.ticketCount} ticket file${report.ticketCount === 1 ? '' : 's'}`;
+  return (
+    `Refusing to create: legacy ticket data detected under ${list} (at least ${files}).\n` +
+    `kodi uses a clean-start model and will not migrate, move, or modify legacy tickets.\n` +
+    `Move or remove the legacy tickets under ${list}, then re-run.`
+  );
 }
 
 /** Build a partial ticket patch from only the flags the user actually set. */
