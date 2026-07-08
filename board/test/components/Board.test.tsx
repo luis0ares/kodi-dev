@@ -93,7 +93,9 @@ describe('Board — empty-board register (§7 register 2) is distinct from regis
   it('shows the board-level "No tickets yet." hint naming `kodi tickets create`', () => {
     render(<Board model={emptyBoardModel()} />);
 
-    const hint = screen.getByRole('status');
+    // KODI-014 adds an always-present polite announcer (also role="status"), so the
+    // empty-board hint is no longer the ONLY status region — select it by its content.
+    const hint = screen.getByText('No tickets yet.').closest('[role="status"]') as HTMLElement;
     expect(hint).toHaveTextContent('No tickets yet.');
     expect(hint).toHaveTextContent('kodi tickets create');
     // Informational, NOT error-styled — must not look like register 4.
@@ -105,7 +107,12 @@ describe('Board — empty-board register (§7 register 2) is distinct from regis
   it('does NOT show the board-level hint when any column has a ticket', () => {
     render(<Board model={boardWith(makeTicket({ key: 'KODI-001', status: 'Blocked' }))} />);
     expect(screen.queryByText('No tickets yet.')).toBeNull();
-    expect(screen.queryByRole('status')).toBeNull();
+    // The board-level hint is absent; the ONLY remaining status region is the
+    // always-present KODI-014 announcer (§5.3), which is sr-only and empty at rest.
+    const statuses = screen.getAllByRole('status');
+    expect(statuses).toHaveLength(1);
+    expect(statuses[0]).toHaveClass('sr-only');
+    expect(statuses[0].textContent).toBe('');
   });
 });
 

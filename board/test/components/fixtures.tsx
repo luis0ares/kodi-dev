@@ -53,9 +53,15 @@ export function boardWith(...tickets: BoardTicket[]): BoardModel {
 
 const noop = () => {};
 
-/** Render a single `Card` with a controlled `expanded` prop and a no-op toggle. */
-export function renderCard(ticket: BoardTicket, expanded = false) {
-  return render(<Card ticket={ticket} expanded={expanded} onToggle={noop} />);
+/**
+ * Render a single `Card` with controlled `expanded` / `arriving` props and a no-op
+ * toggle. `arriving` defaults to false (the KODI-014 one-shot arrival highlight is
+ * off unless a test opts in), symmetric to `expanded`.
+ */
+export function renderCard(ticket: BoardTicket, expanded = false, arriving = false) {
+  return render(
+    <Card ticket={ticket} expanded={expanded} arriving={arriving} onToggle={noop} />,
+  );
 }
 
 /** Cast a Next segment component (typed as prop-less) so tests may pass props. */

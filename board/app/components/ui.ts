@@ -35,6 +35,38 @@ export const STATUS_LEFT: Record<TicketStatus, string> = {
 };
 
 /**
+ * One-shot arrival tint per status (§5.2 / §5.6). Selects the CSS custom-property
+ * hook (`arrive-*`) that `.kodi-arriving` in globals.css color-mixes into the card
+ * background at low intensity — the NEW column's status color. Driven purely by the
+ * ticket's (index-derived) status via a class name, NEVER by an inline style built
+ * from ticket data (security: no dynamic style from ticket content).
+ */
+export const STATUS_ARRIVE: Record<TicketStatus, string> = {
+  Pending: 'arrive-neutral',
+  'In progress': 'arrive-info',
+  'To review': 'arrive-warning',
+  Done: 'arrive-success',
+  Blocked: 'arrive-error',
+};
+
+/**
+ * SSR/test-safe reduced-motion probe (§5.6). Returns false when `window` or
+ * `matchMedia` is absent, and never throws — a missing/absent matchMedia must not
+ * break the SSE render path. Used to guard the JS FLIP (skip transforms) while the
+ * static arrival tint + ARIA announcement still fire.
+ */
+export function prefersReducedMotion(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false;
+  }
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Security req 2 — the prUrl scheme allow-list. Returns the normalized href ONLY
  * when the value is a non-empty `http:`/`https:` URL; otherwise null (rejecting
  * `javascript:`/`data:`/`vbscript:`/`file:` and protocol-relative `//host`).

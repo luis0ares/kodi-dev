@@ -13,10 +13,12 @@ interface ColumnProps {
   column: BoardColumn;
   headingId: string;
   expandedKeys: Set<string>;
+  /** Ephemeral set of ticket.key values currently showing the arrival highlight (§5.2). */
+  arrivingKeys: Set<string>;
   onToggle: (key: string) => void;
 }
 
-export function Column({ column, headingId, expandedKeys, onToggle }: ColumnProps) {
+export function Column({ column, headingId, expandedKeys, arrivingKeys, onToggle }: ColumnProps) {
   const count = column.tickets.length;
 
   return (
@@ -41,6 +43,7 @@ export function Column({ column, headingId, expandedKeys, onToggle }: ColumnProp
               key={ticket.key}
               ticket={ticket}
               expanded={expandedKeys.has(ticket.key)}
+              arriving={arrivingKeys.has(ticket.key)}
               onToggle={onToggle}
             />
           ))

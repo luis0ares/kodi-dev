@@ -9,15 +9,21 @@
 // no dangerouslySetInnerHTML, no markdown-to-HTML (security req 1).
 
 import type { BoardTicket } from '@/lib/tickets/types';
-import { STATUS_LEFT, hasText, safeHttpUrl } from './ui';
+import { STATUS_ARRIVE, STATUS_LEFT, hasText, safeHttpUrl } from './ui';
 
 interface CardProps {
   ticket: BoardTicket;
   expanded: boolean;
+  /**
+   * One-shot arrival highlight (§5.2 / design-system §2.3 Card contract). EPHEMERAL
+   * UI state only — a brief settle/pulse tint in the new column's status color that
+   * auto-expires (~2s) via a Board timer. Never a persistent model flag.
+   */
+  arriving: boolean;
   onToggle: (key: string) => void;
 }
 
-export function Card({ ticket, expanded, onToggle }: CardProps) {
+export function Card({ ticket, expanded, arriving, onToggle }: CardProps) {
   const contentId = `card-content-${ticket.key}`;
   const depCount = ticket.dependencies.length;
   const hasAdr = ticket.drivers.adr.length > 0;
@@ -27,13 +33,21 @@ export function Card({ ticket, expanded, onToggle }: CardProps) {
 
   return (
     // `card` + daisyUI `collapse`, EXTERNALLY controlled via collapse-open/close
-    // (not the uncontrolled checkbox/tabindex self-state — §2.3). Keyed by
-    // ticket.key at the Column level so KODI-014 can add arriving/transitions
-    // without a refactor. Thin LEFT status edge (accent only, §2.2).
+    // (not the uncontrolled checkbox/tabindex self-state — §2.3). Thin LEFT status
+    // edge (accent only, §2.2).
+    //
+    // `data-ticket-key` is the STABLE handle Board's FLIP (§5.2) measures by: a live
+    // move re-parents this element across column DOM subtrees, so the animation is
+    // keyed to the ticket, not to a held (stale) node ref. When `arriving`, the
+    // one-shot tint classes fire; `motion-reduce:animate-none` drops the pulse motion
+    // under reduced motion while globals.css keeps the static tint (§5.6).
     <article
+      data-ticket-key={ticket.key}
       className={`card card-sm collapse collapse-arrow border-l-4 bg-base-200 ${
         STATUS_LEFT[ticket.status]
-      } ${expanded ? 'collapse-open' : 'collapse-close'}`}
+      } ${expanded ? 'collapse-open' : 'collapse-close'} ${
+        arriving ? `kodi-arriving ${STATUS_ARRIVE[ticket.status]} motion-reduce:animate-none` : ''
+      }`}
     >
       <button
         type="button"
