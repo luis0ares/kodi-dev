@@ -43,7 +43,7 @@ export function Card({ ticket, expanded, arriving, onToggle }: CardProps) {
     // under reduced motion while globals.css keeps the static tint (§5.6).
     <article
       data-ticket-key={ticket.key}
-      className={`card card-sm collapse collapse-arrow border-l-4 bg-base-200 ${
+      className={`card card-sm collapse collapse-arrow border-l-4 bg-base-100 shadow-sm ${
         STATUS_LEFT[ticket.status]
       } ${expanded ? 'collapse-open' : 'collapse-close'} ${
         arriving ? `kodi-arriving ${STATUS_ARRIVE[ticket.status]} motion-reduce:animate-none` : ''

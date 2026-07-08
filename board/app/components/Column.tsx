@@ -28,7 +28,7 @@ export function Column({ column, headingId, expandedKeys, arrivingKeys, onToggle
     <section
       role="group"
       aria-labelledby={headingId}
-      className={`flex min-h-0 w-72 shrink-0 flex-col rounded-box border-t-4 bg-base-200 ${STATUS_TOP[column.status]}`}
+      className={`flex min-h-0 w-96 shrink-0 flex-col rounded-box border-t-4 bg-base-200 ${STATUS_TOP[column.status]}`}
     >
       <div className="flex items-center justify-between gap-2 px-2 pt-3 pb-2">
         <h2 id={headingId} className="text-sm font-semibold">
