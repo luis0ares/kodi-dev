@@ -1,11 +1,12 @@
 import { getBoard } from '@/app/actions/board';
-import { Board } from '@/app/components/Board';
+import { LiveBoard } from '@/app/components/LiveBoard';
 
-// The board screen (KODI-010). Async SERVER component: fetches the §7 board model
-// via the KODI-009 read path (getBoard never throws) and hands the model to the
-// CLIENT Board, which renders the five fixed columns and owns expansion view-state.
-// Only the nine §7 fields cross the server→client boundary (security req 4).
+// The board screen (KODI-010/013). Async SERVER component: fetches the §7 board
+// model via the KODI-009 read path (getBoard never throws) and hands the initial
+// model to the CLIENT LiveBoard wrapper, which renders the pure Board and opens
+// the SSE live channel (KODI-013). Only the nine §7 fields cross the
+// server→client boundary (security req 4).
 export default async function Home() {
   const model = await getBoard();
-  return <Board model={model} />;
+  return <LiveBoard initialModel={model} />;
 }
