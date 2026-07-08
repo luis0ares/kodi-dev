@@ -8,20 +8,20 @@
 // with the header staying visible. Empty column shows the quiet in-column "No tickets"
 // placeholder (register 1) — the ONE intentional placeholder in the system (§3).
 
-import type { BoardColumn } from '@/lib/tickets/types';
+import type { BoardColumn, BoardTicket } from '@/lib/tickets/types';
 import { STATUS_BADGE, STATUS_TOP } from './ui';
 import { Card } from './Card';
 
 interface ColumnProps {
   column: BoardColumn;
   headingId: string;
-  expandedKeys: Set<string>;
   /** Ephemeral set of ticket.key values currently showing the arrival highlight (§5.2). */
   arrivingKeys: Set<string>;
-  onToggle: (key: string) => void;
+  /** Open the detail modal for a ticket (Board owns the selection state). */
+  onOpen: (ticket: BoardTicket) => void;
 }
 
-export function Column({ column, headingId, expandedKeys, arrivingKeys, onToggle }: ColumnProps) {
+export function Column({ column, headingId, arrivingKeys, onOpen }: ColumnProps) {
   const count = column.tickets.length;
 
   return (
@@ -45,9 +45,8 @@ export function Column({ column, headingId, expandedKeys, arrivingKeys, onToggle
             <Card
               key={ticket.key}
               ticket={ticket}
-              expanded={expandedKeys.has(ticket.key)}
               arriving={arrivingKeys.has(ticket.key)}
-              onToggle={onToggle}
+              onOpen={onOpen}
             />
           ))
         )}

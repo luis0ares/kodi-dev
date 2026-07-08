@@ -10,9 +10,10 @@
 // stays keyed by ticket.key so it survives a move (§5.4). Nothing here touches the
 // SSE transport (that is LiveBoard) or adds a field to the model.
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { BoardModel, TicketStatus } from '@/lib/tickets/types';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { BoardModel, BoardTicket, TicketStatus } from '@/lib/tickets/types';
 import { Column } from './Column';
+import { TicketModal } from './TicketModal';
 import { prefersReducedMotion } from './ui';
 
 /** How long the one-shot arrival highlight lingers before it self-decays (§5.2, ~2s). */
@@ -21,7 +22,10 @@ const ARRIVAL_MS = 2000;
 const FLIP_MS = 300;
 
 export function Board({ model }: { model: BoardModel }) {
-  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set());
+  // The ticket whose detail modal is open, or null. A single Board-level dialog
+  // (rendered only while non-null) replaces the old per-card expansion registry —
+  // opening a card is view-state only (R-014), never a mutation.
+  const [selected, setSelected] = useState<BoardTicket | null>(null);
 
   // Ephemeral arrival-highlight state (§5.2): a Set of ticket.key values currently
   // pulsing, each cleared by its own ~2s timer. This is VIEW state only — there is NO
@@ -39,18 +43,6 @@ export function Board({ model }: { model: BoardModel }) {
   const prevRectsRef = useRef<Map<string, DOMRect>>(new Map());
   // Pending arrival timers, keyed by ticket.key, so we can clear them on unmount.
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-
-  const toggle = useCallback((key: string) => {
-    setExpandedKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
-  }, []);
 
   // Detect moves, run the FLIP (§5.2), fire the arrival highlight (§5.2) + the polite
   // announcement (§5.3). Runs before paint so the inverse transform lands with no flash.
@@ -190,12 +182,15 @@ export function Board({ model }: { model: BoardModel }) {
             key={column.status}
             column={column}
             headingId={`col-heading-${i}`}
-            expandedKeys={expandedKeys}
             arrivingKeys={arrivingKeys}
-            onToggle={toggle}
+            onOpen={setSelected}
           />
         ))}
       </div>
+
+      {/* The ONE detail dialog for the whole board — mounted only while a ticket is
+          selected, so a board with nothing open has no dialog in the DOM. */}
+      {selected && <TicketModal ticket={selected} onClose={() => setSelected(null)} />}
     </main>
   );
 }

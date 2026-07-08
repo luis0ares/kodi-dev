@@ -117,29 +117,30 @@ describe('Board — empty-board register (§7 register 2) is distinct from regis
 });
 
 describe('Board — read-only (R-014): no mutation surface', () => {
-  it('renders no form and no mutation inputs; only disclosure buttons are interactive', async () => {
+  it('renders no form and no mutation inputs; opening a card modal surfaces none', async () => {
     const model = boardWith(
       makeTicket({ key: 'KODI-001', status: 'Pending', prUrl: 'https://example.com/pr/1' }),
       makeTicket({ key: 'KODI-002', status: 'Done' }),
     );
     const { container } = render(<Board model={model} />);
 
-    // Expand a card so any hidden mutation control would surface.
-    const user = userEvent.setup();
-    await user.click(screen.getAllByRole('button')[0]);
+    // At rest: two card triggers, no dialog, no mutation controls.
+    expect(screen.getAllByRole('button')).toHaveLength(2);
+    expect(screen.queryByRole('dialog')).toBeNull();
 
-    expect(container.querySelector('form')).toBeNull();
+    // Open a card modal so any hidden mutation control would surface.
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /KODI-001/ }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    // Still no mutation surface: no form fields anywhere on the board or in the modal.
     expect(screen.queryAllByRole('textbox')).toHaveLength(0);
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
     expect(screen.queryAllByRole('combobox')).toHaveLength(0);
     expect(screen.queryAllByRole('radio')).toHaveLength(0);
-
-    // The ONLY buttons are disclosure controls (each carries aria-expanded).
-    const buttons = screen.getAllByRole('button');
-    expect(buttons).toHaveLength(2);
-    for (const btn of buttons) {
-      expect(btn).toHaveAttribute('aria-expanded');
-    }
+    // The only <form> markup a mutation UI would need is absent (the daisyUI modal
+    // backdrop is a plain <button>, not a form).
+    expect(container.querySelector('form')).toBeNull();
   });
 });
 

@@ -54,14 +54,14 @@ export function boardWith(...tickets: BoardTicket[]): BoardModel {
 const noop = () => {};
 
 /**
- * Render a single `Card` with controlled `expanded` / `arriving` props and a no-op
- * toggle. `arriving` defaults to false (the KODI-014 one-shot arrival highlight is
- * off unless a test opts in), symmetric to `expanded`.
+ * Render a single `Card` with a controlled `arriving` prop and a no-op open handler.
+ * `arriving` defaults to false (the KODI-014 one-shot arrival highlight is off unless
+ * a test opts in). The card face is identity + tags only; the heavier §7 fields live
+ * in the Board-level modal, so single-Card tests assert the face, and modal behavior
+ * is covered through the full <Board> render.
  */
-export function renderCard(ticket: BoardTicket, expanded = false, arriving = false) {
-  return render(
-    <Card ticket={ticket} expanded={expanded} arriving={arriving} onToggle={noop} />,
-  );
+export function renderCard(ticket: BoardTicket, arriving = false) {
+  return render(<Card ticket={ticket} arriving={arriving} onOpen={noop} />);
 }
 
 /** Cast a Next segment component (typed as prop-less) so tests may pass props. */

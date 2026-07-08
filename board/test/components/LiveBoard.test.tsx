@@ -177,7 +177,7 @@ describe('LiveBoard — cleanup on unmount (no leaked client handle)', () => {
 });
 
 describe('LiveBoard — key-based rendering preserved across a live update (KODI-010)', () => {
-  it('keeps a card keyed by ticket.key: expansion follows the key to its new column', async () => {
+  it('keeps a card keyed by ticket.key: its open detail modal survives the move to a new column', async () => {
     const ticket = makeTicket({ key: 'KODI-042', title: 'Wire it up', status: 'Pending' });
     const initial = boardWith(ticket);
     const next = boardWith({ ...ticket, status: 'Done' });
@@ -185,23 +185,21 @@ describe('LiveBoard — key-based rendering preserved across a live update (KODI
 
     render(<LiveBoard initialModel={initial} />);
 
-    // Expand the card while it lives in Pending (Board owns the key-indexed
-    // expansion registry — §5.4).
+    // Open the detail modal while the card lives in Pending (Board owns the single
+    // selection state; the dialog is mounted only while a ticket is selected).
     const user = userEvent.setup();
-    const disclosure = within(column('Pending')).getByRole('button');
-    await user.click(disclosure);
-    expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+    await user.click(within(column('Pending')).getByRole('button'));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
 
     await dispatchChange();
 
-    // After the live update the card is in Done AND still expanded: the
-    // Board did not remount (its registry survived) and the card's identity
+    // After the live update the card is in Done AND the modal is still open: the
+    // Board did not remount (its selection survived) and the card's identity
     // tracked its ticket.key to the new column.
     await waitFor(() => {
       expect(within(column('Done')).getByText('KODI-042')).toBeInTheDocument();
     });
-    const movedButton = within(column('Done')).getByRole('button');
-    expect(movedButton).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
     // The old column no longer holds the card.
     expect(within(column('Pending')).queryByText('KODI-042')).toBeNull();
   });

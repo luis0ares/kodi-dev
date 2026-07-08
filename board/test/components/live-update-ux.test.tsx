@@ -354,13 +354,13 @@ describe('KODI-014 — single polite ARIA-live announcer (§5.3)', () => {
     );
   });
 
-  it('does NOT announce when a card is merely expanded (no move)', async () => {
+  it('does NOT announce when a card modal is merely opened (no move)', async () => {
     getBoardMock.mockResolvedValue(boardWith());
     const { container } = renderLive(
       boardWith(makeTicket({ key: 'KODI-042', status: 'Pending' })),
     );
 
-    // Toggle disclosure — a view-only change, not a column move.
+    // Open the detail modal — a view-only change, not a column move.
     fireEvent.click(within(column('Pending')).getByRole('button'));
     // Flush any frame the (unchanged) layout effect might schedule.
     await act(async () => {
@@ -372,28 +372,28 @@ describe('KODI-014 — single polite ARIA-live announcer (§5.3)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. EXPANSION SURVIVES A MOVE, and coexists with the arrival highlight
+// 6. THE OPEN DETAIL MODAL SURVIVES A MOVE, and coexists with the arrival highlight
 // ---------------------------------------------------------------------------
-describe('KODI-014 — expansion survives a move (KODI-010 unregressed)', () => {
-  it('keeps aria-expanded across the move AND shows the arrival highlight together', async () => {
+describe('KODI-014 — the open detail modal survives a move (KODI-010 unregressed)', () => {
+  it('keeps the dialog open across the move AND shows the arrival highlight together', async () => {
     const mover = makeTicket({ key: 'KODI-042', title: 'Wire it up', status: 'Pending' });
     getBoardMock.mockResolvedValue(boardWith({ ...mover, status: 'Done' }));
 
     const { container } = renderLive(boardWith(mover));
 
-    // Expand it while it lives in Pending.
-    const disclosure = within(column('Pending')).getByRole('button');
-    fireEvent.click(disclosure);
-    expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+    // Open the detail modal while the card lives in Pending.
+    fireEvent.click(within(column('Pending')).getByRole('button'));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
 
     await move();
 
-    // After the move: in Done, STILL expanded (registry keyed by ticket.key survived)...
-    const movedButton = within(column('Done')).getByRole('button');
-    expect(movedButton).toHaveAttribute('aria-expanded', 'true');
+    // After the move: the dialog is STILL open (Board's selection state survived the
+    // refetch), the card now lives in Done...
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(within(column('Done')).getByText('KODI-042')).toBeInTheDocument();
+    expect(within(column('Pending')).queryByText('KODI-042')).toBeNull();
     // ...and the same card is simultaneously arriving — the two features coexist.
     expect(ticketNode(container, 'KODI-042')!).toHaveClass('kodi-arriving');
-    expect(within(column('Pending')).queryByText('KODI-042')).toBeNull();
   });
 });
 
