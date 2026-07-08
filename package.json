@@ -38,7 +38,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "pnpm lint:cli && pnpm lint:board",
     "lint:cli": "eslint src tests && prettier --check .",
-    "lint:board": "sh -c '[ -f board/package.json ] && pnpm -C board lint || echo \"lint:board skipped (board/ not present)\"'",
+    "lint:board": "sh -c 'if [ -f board/package.json ]; then pnpm -C board lint; else echo \"lint:board skipped (board/ not present)\"; fi'",
     "format": "prettier --write .",
     "prepublishOnly": "tsup"
   },

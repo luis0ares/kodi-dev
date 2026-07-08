@@ -1,0 +1,18 @@
+# Board-local pnpm workspace ROOT.
+#
+# This file exists so board/ resolves as its OWN independent workspace root
+# (self-containment: R-010 / ADR-0002 §2.3, §2.6). pnpm walks up to the nearest
+# pnpm-workspace.yaml; having one here stops it before the repo root, so the
+# board gets its own node_modules + board/pnpm-lock.yaml and is never pulled
+# into the root install. It is NOT a member of the root workspace — there is
+# deliberately NO `packages:` glob here (or anywhere).
+#
+# `allowBuilds` grants the MINIMAL set of native build scripts the Next + ESLint
+# toolchain needs (pnpm 11 blocks build scripts by default). This mirrors the
+# root's `allowBuilds` convention and replaces the deprecated package.json
+# `pnpm.onlyBuiltDependencies` field (no longer read by pnpm 11):
+#   - sharp:         Next.js image optimizer native binary
+#   - unrs-resolver: native resolver used by eslint-config-next's import rules
+allowBuilds:
+  sharp: true
+  unrs-resolver: true

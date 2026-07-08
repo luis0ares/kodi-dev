@@ -1,0 +1,25 @@
+# Dependencies
+/node_modules
+
+# Next.js build output
+/.next
+/out
+/build
+
+# Standalone server bundle
+/.next/standalone
+
+# TypeScript / Next generated types
+next-env.d.ts
+*.tsbuildinfo
+
+# Environment (no real .env committed)
+.env
+.env.*
+
+# Logs & OS cruft
+*.log
+.DS_Store
+
+# Next telemetry / caches
+.vercel
