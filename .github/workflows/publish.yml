@@ -31,14 +31,16 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm -C board install --frozen-lockfile
 
+      # Build FIRST: board-dist/ is a gitignored artifact that the CLI serve tests
+      # resolve on disk (package-relative), so it must exist before `pnpm test`.
+      - name: Build board + CLI (bundles the board into board-dist/)
+        run: pnpm build
+
       - name: Type-check
         run: pnpm typecheck
 
       - name: Test
         run: pnpm test
-
-      - name: Build board + CLI (bundles the board into board-dist/)
-        run: pnpm build
 
       # On a Release, publish the tag's version (strip a leading "v"), so the npm
       # version follows the GitHub Release instead of whatever is in package.json.
