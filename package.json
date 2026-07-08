@@ -25,13 +25,15 @@
   },
   "files": [
     "dist",
-    "assets"
+    "assets",
+    "board-dist"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "pnpm build:board && tsup",
+    "build:board": "pnpm -C board install --prefer-offline && pnpm -C board build && node scripts/build-board.mjs",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -40,7 +42,7 @@
     "lint:cli": "eslint src tests && prettier --check .",
     "lint:board": "sh -c 'if [ -f board/package.json ]; then pnpm -C board lint; else echo \"lint:board skipped (board/ not present)\"; fi'",
     "format": "prettier --write .",
-    "prepublishOnly": "tsup"
+    "prepublishOnly": "pnpm build"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.2.1",

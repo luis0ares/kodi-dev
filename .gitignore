@@ -2,5 +2,6 @@ archive
 node_modules
 *.env
 dist
+board-dist
 *.log
 .DS_Store

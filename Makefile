@@ -39,4 +39,4 @@ dev: ## Rebuild on change
 	pnpm dev
 
 clean: ## Remove build output and dependencies
-	rm -rf dist node_modules
+	rm -rf dist board-dist node_modules
