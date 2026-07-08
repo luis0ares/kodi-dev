@@ -29,7 +29,9 @@ jobs:
       - name: Install dependencies (CLI + self-contained board)
         run: |
           pnpm install --frozen-lockfile
-          pnpm -C board install --frozen-lockfile
+          # hoisted: a symlink-free board node_modules so the Next standalone
+          # bundle survives `npm publish` (which drops symlinks) — see build:board.
+          pnpm -C board install --frozen-lockfile --node-linker=hoisted
 
       # Build FIRST: board-dist/ is a gitignored artifact that the CLI serve tests
       # resolve on disk (package-relative), so it must exist before `pnpm test`.

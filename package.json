@@ -1,6 +1,6 @@
 {
   "name": "kodi-dev",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "kodi.dev — Claude Code-native agent orchestrator CLI",
   "license": "MIT",
   "author": "Luis Soares",
@@ -33,7 +33,7 @@
   },
   "scripts": {
     "build": "pnpm build:board && tsup",
-    "build:board": "pnpm -C board install --prefer-offline && pnpm -C board build && node scripts/build-board.mjs",
+    "build:board": "pnpm -C board install --prefer-offline --node-linker=hoisted && pnpm -C board build && node scripts/build-board.mjs",
     "dev": "tsup --watch",
     "test": "pnpm test:cli && pnpm test:board",
     "test:cli": "vitest run",
