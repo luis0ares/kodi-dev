@@ -116,15 +116,25 @@ export function parseVulnerabilities(command: string): string[] {
   return out;
 }
 
+/** The ticket key of a `kodi tickets hand-off <key>` command, else null. */
+export function parseHandoffKey(command: string): string | null {
+  const m = command.match(/\bkodi\s+tickets\s+hand-off\s+([^\s'"]+)/);
+  return m ? m[1] : null;
+}
+
 /**
  * Deterministically capture durable artifacts from a kodi command — no LLM, no
- * transcript parsing. v1 captures the security findings listed on a `kodi pr create`
- * as `gotcha` memories (deduped/idempotent). Best-effort: never throws.
+ * transcript parsing. Captures: the security findings on a `kodi pr create
+ * --vulnerability …` (as `gotcha`, always — a vuln is a fact regardless of dry-run),
+ * and a `kodi tickets hand-off <key>` slice-completion milestone (as `task-note`, but
+ * ONLY on a real run — `dryRun` skips it so a preview isn't remembered as done).
+ * Deduped/idempotent. Best-effort: never throws.
  */
-function captureFromCommand(command: string, cwd: string): void {
+function captureFromCommand(command: string, cwd: string, dryRun: boolean): void {
   try {
     const vulns = parseVulnerabilities(command);
-    if (vulns.length === 0) return;
+    const handoff = dryRun ? null : parseHandoffKey(command);
+    if (vulns.length === 0 && !handoff) return;
     const db = openDb();
     try {
       const col = resolveCollection(db, cwd);
@@ -133,6 +143,17 @@ function captureFromCommand(command: string, cwd: string): void {
           db,
           col.collection,
           MemoryDraftSchema.parse({ content: `Security finding: ${v}`, type: 'gotcha' }),
+        );
+      }
+      if (handoff) {
+        insertMemory(
+          db,
+          col.collection,
+          MemoryDraftSchema.parse({
+            content: `Ticket ${handoff} handed off to review — slice complete, PR opened.`,
+            type: 'task-note',
+            ticket: handoff,
+          }),
         );
       }
     } finally {
@@ -192,7 +213,10 @@ export function registerHookCommand(program: Command) {
       const toolInput = (input.tool_input ?? {}) as Record<string, unknown>;
       const command = typeof toolInput.command === 'string' ? toolInput.command : '';
       const cwd = typeof input.cwd === 'string' ? input.cwd : process.cwd();
-      if (command) captureFromCommand(command, cwd);
+      // A kodi mutation prints "[dry-run] …" when not executed (no --yes). Detect it
+      // from the tool response so a previewed hand-off isn't captured as completed.
+      const dryRun = JSON.stringify(input.tool_response ?? '').includes('[dry-run]');
+      if (command) captureFromCommand(command, cwd, dryRun);
       // Capture is a pure side effect — emit nothing.
     });
 

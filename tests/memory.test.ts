@@ -16,7 +16,7 @@ import {
   removeMemory,
   resolveCollection,
 } from '../src/memory/store.js';
-import { parseVulnerabilities } from '../src/commands/hook.js';
+import { parseHandoffKey, parseVulnerabilities } from '../src/commands/hook.js';
 import { contentHash, MemoryDraftSchema } from '../src/memory/template.js';
 
 const COL = 'test-col';
@@ -255,6 +255,13 @@ describe('PostToolUse capture parsing', () => {
     expect(parseVulnerabilities('kodi tickets list --json')).toEqual([]);
     expect(parseVulnerabilities('kodi pr create --title x --source f --target main')).toEqual([]);
     expect(parseVulnerabilities('echo --vulnerability "not a kodi pr"')).toEqual([]);
+  });
+
+  it('extracts the ticket key from a hand-off command (incl. via rtk), else null', () => {
+    expect(parseHandoffKey('kodi tickets hand-off KODI-14')).toBe('KODI-14');
+    expect(parseHandoffKey('rtk kodi tickets hand-off CC-3 --pr https://x/1')).toBe('CC-3');
+    expect(parseHandoffKey('kodi tickets list')).toBeNull();
+    expect(parseHandoffKey('kodi tickets start KODI-14')).toBeNull();
   });
 });
 
