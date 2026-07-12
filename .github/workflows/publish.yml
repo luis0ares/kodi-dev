@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # push the release tag after publishing
   id-token: write # for npm provenance
 
 jobs:
@@ -55,3 +55,19 @@ jobs:
         run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Only reached when `npm publish` above succeeds (a failed step stops the job),
+      # so the repo is tagged only for versions that actually made it to npm. Tags the
+      # published package.json version as `v<version>`; a no-op when the tag already
+      # exists (e.g. the tag a GitHub Release created).
+      - name: Tag the repository (after a successful publish)
+        run: |
+          VERSION="v$(node -p "require('./package.json').version")"
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "Tag $VERSION already exists — skipping."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$VERSION" -m "Release $VERSION"
+            git push origin "refs/tags/$VERSION"
+          fi
