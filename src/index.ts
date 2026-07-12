@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { registerAddCommand } from './commands/add.js';
 import { registerHookCommand } from './commands/hook.js';
 import { registerInitCommand } from './commands/init.js';
+import { registerMemoryCommand } from './commands/memory.js';
 import { registerPrCommand } from './commands/pr.js';
 import { registerServeCommand } from './commands/serve.js';
 import { registerTicketsCommand } from './commands/tickets.js';
@@ -21,6 +22,7 @@ registerPrCommand(program);
 registerHookCommand(program);
 registerInitCommand(program);
 registerAddCommand(program);
+registerMemoryCommand(program);
 
 program.parseAsync(process.argv).catch((err) => {
   process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);

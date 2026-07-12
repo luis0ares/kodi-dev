@@ -43,6 +43,10 @@ board — there is no message bus.
 - Manage tickets and PRs ONLY through the \`kodi\` CLI (\`kodi tickets …\`,
   \`kodi pr …\`) — it proxies \`gh\`/\`az\` and enforces the templates. Remote
   mutations are dry-run unless \`--yes\`.
+- Persist and recall project knowledge with \`kodi memory\`: \`kodi memory query
+  <text>\` before working a subsystem, and \`kodi memory store\` a durable finding
+  (decision / gotcha / convention / architecture / reference / task-note) as you
+  learn it. Cross-session and project-scoped — see the memory rule.
 - The thin \`CLAUDE.md\` is the single source of truth for the stack, gate
   commands, provider, and installed skill-packs.
 `;

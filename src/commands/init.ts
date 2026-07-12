@@ -7,11 +7,13 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { stringify as stringifyYaml } from 'yaml';
 import { stateFilePath, type BoardConfig } from '../config.js';
+import { openDb } from '../memory/db.js';
+import { provisionCollection } from '../memory/store.js';
 import { DEFAULT_COLUMNS } from '../providers/azure.js';
 import {
   getProjectInfo,
@@ -567,6 +569,21 @@ export function registerInitCommand(program: Command) {
       }
 
       const changed = installHarness(root, { force: o.force, provider: config.provider });
+
+      // Provision this project's memory collection (best-effort — never block init)
+      // and bind it in the state file so `kodi memory` and the SessionStart digest
+      // scope to it. Keyed by the ABSOLUTE root so it matches later `findProjectRoot`.
+      try {
+        const db = openDb();
+        const displayName =
+          config.project ??
+          (config.repository ? basename(config.repository) : basename(resolve(root)));
+        config.memory = provisionCollection(db, resolve(root), displayName);
+        db.close();
+      } catch {
+        /* memory is optional; a failure here must not abort init */
+      }
+
       const statePath = writeState(root, config);
       process.stdout.write(
         `\nkodi init: installed\n${changed.map((c) => `  + ${c}`).join('\n')}\n` +

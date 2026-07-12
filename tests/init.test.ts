@@ -12,6 +12,8 @@ import {
   PERMISSION_DENY,
   writeState,
 } from '../src/commands/init.js';
+import { openDb } from '../src/memory/db.js';
+import { provisionCollection } from '../src/memory/store.js';
 import type { Prompter } from '../src/prompt.js';
 import { normalizeOrgUrl, type IssueState, type Runner } from '../src/providers/azure-discovery.js';
 
@@ -138,9 +140,7 @@ describe('permissions merge', () => {
   });
 
   it('allows all kodi commands (direct + rtk) while init stays denied — deny wins', () => {
-    expect(PERMISSION_ALLOW).toEqual(
-      expect.arrayContaining(['Bash(kodi:*)', 'Bash(rtk kodi:*)']),
-    );
+    expect(PERMISSION_ALLOW).toEqual(expect.arrayContaining(['Bash(kodi:*)', 'Bash(rtk kodi:*)']));
     // the broad allow and the narrow init-deny coexist; deny precedence blocks init
     expect(PERMISSION_DENY).toEqual(
       expect.arrayContaining(['Bash(kodi init:*)', 'Bash(rtk kodi init:*)']),
@@ -456,5 +456,16 @@ describe('writeState', () => {
     expect(p).toContain('.claude/kodi-dev.yaml');
     const yaml = readFileSync(p, 'utf-8');
     expect(yaml).toContain('provider: local');
+  });
+
+  it('provisions a memory collection and binds it in the state file (as init does)', () => {
+    const db = openDb(join(dir, 'rag.db'));
+    const col = provisionCollection(db, dir, 'demo');
+    db.close();
+    const p = writeState(dir, { provider: 'local', prefix: 'KODI', memory: col });
+    const yaml = readFileSync(p, 'utf-8');
+    expect(yaml).toContain('memory:');
+    expect(yaml).toContain(col.collection);
+    expect(col.collection).toMatch(/^demo-[0-9a-f]{6}$/);
   });
 });
