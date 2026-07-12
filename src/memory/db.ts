@@ -38,6 +38,13 @@ CREATE TABLE IF NOT EXISTS memories (
   files_json   TEXT NOT NULL DEFAULT '[]',
   created_at   TEXT NOT NULL,
   content_hash TEXT NOT NULL,
+  -- veracity score (see docs/memory-veracity-score.md): 0-5, fresh = 3.
+  score            INTEGER NOT NULL DEFAULT 3,
+  status           TEXT NOT NULL DEFAULT 'active',   -- active | tombstoned
+  needs_reverify   INTEGER NOT NULL DEFAULT 0,
+  file_hashes      TEXT,                              -- JSON { path: sha256 }
+  verified_at      TEXT,
+  tombstone_reason TEXT,
   UNIQUE(collection_id, content_hash)
 );
 CREATE INDEX IF NOT EXISTS idx_memories_collection ON memories(collection_id);
@@ -48,6 +55,27 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
   title
 );
 `;
+
+/** Veracity columns added after v1; ALTER them onto a pre-existing memories table. */
+const VERACITY_COLUMNS: Array<[name: string, ddl: string]> = [
+  ['score', 'INTEGER NOT NULL DEFAULT 3'],
+  ['status', "TEXT NOT NULL DEFAULT 'active'"],
+  ['needs_reverify', 'INTEGER NOT NULL DEFAULT 0'],
+  ['file_hashes', 'TEXT'],
+  ['verified_at', 'TEXT'],
+  ['tombstone_reason', 'TEXT'],
+];
+
+/** Bring a pre-v2 memories table up to the veracity schema (idempotent). */
+function migrate(db: DatabaseSync): void {
+  const rows = db.prepare('PRAGMA table_info(memories)').all() as unknown as Array<{
+    name: string;
+  }>;
+  const cols = new Set(rows.map((c) => c.name));
+  for (const [name, ddl] of VERACITY_COLUMNS) {
+    if (!cols.has(name)) db.exec(`ALTER TABLE memories ADD COLUMN ${name} ${ddl}`);
+  }
+}
 
 /**
  * Open the memory DB (creating its directory and schema if needed) and return the
@@ -69,5 +97,6 @@ export function openDb(path: string = ragDbPath()): DatabaseSync {
   db.exec('PRAGMA synchronous = NORMAL;');
   db.exec('PRAGMA foreign_keys = ON;');
   db.exec(SCHEMA);
+  migrate(db);
   return db;
 }

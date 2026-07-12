@@ -84,7 +84,7 @@ export function mergeUserPromptSubmitHook(settings: Record<string, any>): boolea
  * `kodi pr create`) into memory — no LLM, pure side effect.
  */
 export function mergePostToolUseHook(settings: Record<string, any>): boolean {
-  return addHookOnce(settings, 'PostToolUse', PTU_COMMAND, 'Bash');
+  return addHookOnce(settings, 'PostToolUse', PTU_COMMAND, 'Bash|Write|Edit');
 }
 
 /**

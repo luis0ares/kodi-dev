@@ -122,12 +122,12 @@ describe('UserPromptSubmit hook merge', () => {
 });
 
 describe('PostToolUse hook merge', () => {
-  it('adds the capture hook with a Bash matcher and is idempotent', () => {
+  it('adds the hook with a Bash|Write|Edit matcher and is idempotent', () => {
     const settings: Record<string, any> = {};
     expect(mergePostToolUseHook(settings)).toBe(true);
     expect(mergePostToolUseHook(settings)).toBe(false);
     expect(settings.hooks.PostToolUse).toHaveLength(1);
-    expect(settings.hooks.PostToolUse[0].matcher).toBe('Bash');
+    expect(settings.hooks.PostToolUse[0].matcher).toBe('Bash|Write|Edit');
     expect(settings.hooks.PostToolUse[0].hooks[0].command).toBe('kodi hook post-tool-use');
   });
 });

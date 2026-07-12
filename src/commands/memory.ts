@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { Command } from 'commander';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { findProjectRoot } from '../config.js';
 import { openDb } from '../memory/db.js';
 import {
   amendMemory,
@@ -10,6 +11,7 @@ import {
   queryMemories,
   removeMemory,
   resolveCollection,
+  verifyMemory,
   type Collection,
   type QueryHit,
 } from '../memory/store.js';
@@ -40,11 +42,12 @@ function asType(v: unknown): MemoryType | undefined {
   return v as MemoryType;
 }
 
-/** One line per memory for the human surface. */
-function renderLine(m: MemoryRecord & { score?: number }): string {
+/** One line per memory for the human surface (score★, needs-reverify flag). */
+function renderLine(m: MemoryRecord): string {
   const files = m.files.length ? `  {${fileNames(m.files).join(', ')}}` : '';
   const ticket = m.ticket ? `  ${m.ticket}` : '';
-  return `${m.id}  [${m.type}]${ticket}  ${m.title}${files}`;
+  const flag = m.needsReverify ? ' ⚠reverify' : '';
+  return `${m.id}  ${m.score}★  [${m.type}]${ticket}${flag}  ${m.title}${files}`;
 }
 
 function renderList(hits: QueryHit[]): string {
@@ -61,9 +64,11 @@ function withDb<T>(fn: (db: ReturnType<typeof openDb>) => T): T {
   }
 }
 
-/** Like {@link withDb}, but also resolves this project's collection first. */
-function withCollection<T>(fn: (db: ReturnType<typeof openDb>, col: Collection) => T): T {
-  return withDb((db) => fn(db, resolveCollection(db)));
+/** Like {@link withDb}, but also resolves this project's collection + root (for hashing). */
+function withCollection<T>(
+  fn: (db: ReturnType<typeof openDb>, col: Collection, root: string) => T,
+): T {
+  return withDb((db) => fn(db, resolveCollection(db), findProjectRoot()));
 }
 
 export function registerMemoryCommand(program: Command) {
@@ -78,7 +83,12 @@ export function registerMemoryCommand(program: Command) {
     .option('-c, --content <text>', 'the finding to remember')
     .option('-t, --type <type>', `one of: ${MEMORY_TYPES.join(', ')}`)
     .option('--ticket <key>', 'ticket/task in flight (optional)')
-    .option('--file <path>', 'repo-relative file the finding touches (repeatable)', collect, [])
+    .option(
+      '--file <path>',
+      'repo-relative file the finding touches (repeatable, ≥1 required)',
+      collect,
+      [],
+    )
     .option('--title <text>', 'optional display title (else derived from content)')
     .option('--json', 'machine-readable output', false)
     .action((o) => {
@@ -91,12 +101,22 @@ export function registerMemoryCommand(program: Command) {
             files: o.file ?? [],
             title: o.title,
           });
-      withCollection((db, col) => {
-        const { record, deduped } = insertMemory(db, col.collection, draft);
+      withCollection((db, col, root) => {
+        const { record, deduped, blocked } = insertMemory(db, col.collection, draft, root);
+        if (blocked) {
+          out(
+            { ...record, blocked: true },
+            o.json,
+            () =>
+              `Blocked (re-learn guard): ${record.id} was disproven — ${record.tombstoneReason ?? 'refuted'}`,
+          );
+          process.exitCode = 1;
+          return;
+        }
         out({ ...record, deduped }, o.json, () =>
           deduped
             ? `Already stored (dedup): ${record.id} — ${record.title}`
-            : `Stored ${record.id} [${record.type}] — ${record.title}`,
+            : `Stored ${record.id} [${record.type}] (score ${record.score}) — ${record.title}`,
         );
       });
     });
@@ -153,19 +173,52 @@ export function registerMemoryCommand(program: Command) {
     .option('--json', 'machine-readable output', false)
     .action((id: string, o) => {
       withDb((db) => {
-        const updated = amendMemory(db, id, {
-          content: o.content,
-          type: asType(o.type),
-          ticket: o.ticket,
-          files: o.file,
-          title: o.title,
-        });
+        const updated = amendMemory(
+          db,
+          id,
+          {
+            content: o.content,
+            type: asType(o.type),
+            ticket: o.ticket,
+            files: o.file,
+            title: o.title,
+          },
+          findProjectRoot(),
+        );
         if (!updated) {
           out({ error: 'not found', id }, o.json, () => `no memory ${id}`);
           process.exitCode = 1;
           return;
         }
-        out(updated, o.json, () => `Amended ${updated.id} — ${updated.title}`);
+        out(
+          updated,
+          o.json,
+          () => `Amended ${updated.id} (score reset to ${updated.score}) — ${updated.title}`,
+        );
+      });
+    });
+
+  memory
+    .command('verify <id>')
+    .description('Record a veracity judgment: --pass raises the score, --fail tombstones')
+    .option('--pass', 'the memory still holds against its files (score +1)', false)
+    .option('--fail', 'the memory is disproven (tombstone + re-learn guard)', false)
+    .option('--reason <text>', 'why it failed (stored on the tombstone)')
+    .option('--json', 'machine-readable output', false)
+    .action((id: string, o) => {
+      if (o.pass === o.fail) throw new Error('pass exactly one of --pass or --fail.');
+      withDb((db) => {
+        const updated = verifyMemory(db, id, !!o.pass, findProjectRoot(), o.reason);
+        if (!updated) {
+          out({ error: 'not found', id }, o.json, () => `no memory ${id}`);
+          process.exitCode = 1;
+          return;
+        }
+        out(updated, o.json, () =>
+          updated.status === 'tombstoned'
+            ? `Tombstoned ${updated.id} — ${updated.tombstoneReason}`
+            : `Verified ${updated.id} — score now ${updated.score}`,
+        );
       });
     });
 
@@ -218,8 +271,8 @@ export function registerMemoryCommand(program: Command) {
     .option('--json', 'machine-readable output', false)
     .action((path: string, o) => {
       const doc = MemoryExportDocSchema.parse(parseYaml(readFileSync(path, 'utf-8')));
-      withCollection((db, col) => {
-        const res = importMemories(db, col.collection, doc.memories, asType(o.type));
+      withCollection((db, col, root) => {
+        const res = importMemories(db, col.collection, doc.memories, root, asType(o.type));
         out(res, o.json, () => `Imported: +${res.added} added, ${res.skipped} skipped`);
       });
     });

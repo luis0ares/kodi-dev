@@ -13,8 +13,18 @@ import {
   type MemoryDraft,
   type MemoryImportRecord,
   type MemoryRecord,
+  type MemoryStatus,
   type MemoryType,
 } from './template.js';
+import {
+  anyFileChanged,
+  hashFile,
+  hashFiles,
+  parseFileHashes,
+  SCORE_FRESH,
+  SCORE_MAX,
+  SCORE_STALE_CAP,
+} from './veracity.js';
 
 /** A resolved project collection: its stable DB key + display name. */
 export type Collection = MemoryBinding;
@@ -162,7 +172,14 @@ interface MemRow {
   files_json: string;
   created_at: string;
   content_hash: string;
-  score?: number;
+  score: number;
+  status: string;
+  needs_reverify: number;
+  file_hashes: string | null;
+  verified_at: string | null;
+  tombstone_reason: string | null;
+  /** bm25 rank, present only on FTS queries. */
+  bm25?: number;
 }
 
 function rowToRecord(r: MemRow): MemoryRecord {
@@ -176,6 +193,12 @@ function rowToRecord(r: MemRow): MemoryRecord {
     files: JSON.parse(r.files_json || '[]') as string[],
     createdAt: r.created_at,
     contentHash: r.content_hash,
+    score: r.score,
+    status: r.status as MemoryStatus,
+    needsReverify: !!r.needs_reverify,
+    fileHashes: parseFileHashes(r.file_hashes),
+    verifiedAt: r.verified_at ?? null,
+    tombstoneReason: r.tombstone_reason ?? null,
   };
 }
 
@@ -189,16 +212,20 @@ interface RawInsert {
   files: string[];
   createdAt: string;
   hash: string;
+  /** sha256 of each linked file at insert time. */
+  fileHashes: Record<string, string>;
 }
 
-/** Insert a fully-formed row + its FTS entry. Assumes no existing hash collision. */
+/** Insert a fresh row (score = 3, active) + its FTS entry. Assumes no hash collision. */
 function rawInsert(db: DatabaseSync, collectionId: string, v: RawInsert): MemoryRecord {
   const id = `mem_${randomUUID().slice(0, 8)}`;
+  const fileHashesJson = JSON.stringify(v.fileHashes);
   tx(db, () => {
     db.prepare(
       `INSERT INTO memories
-         (id, collection_id, content, title, type, ticket, files_json, created_at, content_hash)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, collection_id, content, title, type, ticket, files_json, created_at, content_hash,
+          score, status, needs_reverify, file_hashes, verified_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 0, ?, NULL)`,
     ).run(
       id,
       collectionId,
@@ -209,6 +236,8 @@ function rawInsert(db: DatabaseSync, collectionId: string, v: RawInsert): Memory
       JSON.stringify(v.files),
       v.createdAt,
       v.hash,
+      SCORE_FRESH,
+      fileHashesJson,
     );
     db.prepare('INSERT INTO memories_fts (memory_id, content, title) VALUES (?, ?, ?)').run(
       id,
@@ -226,20 +255,34 @@ function rawInsert(db: DatabaseSync, collectionId: string, v: RawInsert): Memory
     files: v.files,
     createdAt: v.createdAt,
     contentHash: v.hash,
+    score: SCORE_FRESH,
+    status: 'active',
+    needsReverify: false,
+    fileHashes: v.fileHashes,
+    verifiedAt: null,
+    tombstoneReason: null,
   };
 }
 
 export interface InsertResult {
   record: MemoryRecord;
-  /** True when an identical finding already existed (store is a no-op). */
+  /** True when an identical ACTIVE finding already existed (store is a no-op). */
   deduped: boolean;
+  /** True when an identical finding was previously TOMBSTONED (re-learn guard blocked it). */
+  blocked?: boolean;
 }
 
-/** Store a finding, deduped by content hash within the collection (idempotent). */
+/**
+ * Store a finding. `root` is the project root used to hash the linked files. Deduped by
+ * content hash within the collection (idempotent); and if the identical content was
+ * previously refuted (tombstoned), the store is BLOCKED — the re-learn guard, so a
+ * disproven claim can't be silently re-learned.
+ */
 export function insertMemory(
   db: DatabaseSync,
   collectionId: string,
   draft: MemoryDraft,
+  root: string,
 ): InsertResult {
   const hash = contentHash(draft.content);
   const existing = queryOne<MemRow>(
@@ -248,7 +291,12 @@ export function insertMemory(
     collectionId,
     hash,
   );
-  if (existing) return { record: rowToRecord(existing), deduped: true };
+  if (existing) {
+    if (existing.status === 'tombstoned') {
+      return { record: rowToRecord(existing), deduped: false, blocked: true };
+    }
+    return { record: rowToRecord(existing), deduped: true };
+  }
   const record = rawInsert(db, collectionId, {
     content: draft.content,
     title: draft.title ?? derivePreview(draft.content),
@@ -257,6 +305,7 @@ export function insertMemory(
     files: draft.files,
     createdAt: new Date().toISOString(),
     hash,
+    fileHashes: hashFiles(root, draft.files),
   });
   return { record, deduped: false };
 }
@@ -269,8 +318,17 @@ export interface AmendPatch {
   title?: string;
 }
 
-/** Edit a memory in place; returns null when the id is unknown. */
-export function amendMemory(db: DatabaseSync, id: string, patch: AmendPatch): MemoryRecord | null {
+/**
+ * Edit a memory in place; returns null when the id is unknown. Editing makes it a NEW
+ * claim, so the veracity trust is discarded: score resets to fresh (3), needs-reverify
+ * clears, and the file hashes are re-stamped against `root`. `root` hashes the files.
+ */
+export function amendMemory(
+  db: DatabaseSync,
+  id: string,
+  patch: AmendPatch,
+  root: string,
+): MemoryRecord | null {
   const cur = queryOne<MemRow>(db, 'SELECT * FROM memories WHERE id = ?', id);
   if (!cur) return null;
   const prev = rowToRecord(cur);
@@ -296,17 +354,134 @@ export function amendMemory(db: DatabaseSync, id: string, patch: AmendPatch): Me
       );
     }
   }
+  const fileHashes = hashFiles(root, files);
   tx(db, () => {
     db.prepare(
-      'UPDATE memories SET content=?, title=?, type=?, ticket=?, files_json=?, content_hash=? WHERE id=?',
-    ).run(content, title, type, ticket, JSON.stringify(files), hash, id);
+      `UPDATE memories SET content=?, title=?, type=?, ticket=?, files_json=?, content_hash=?,
+         score=?, needs_reverify=0, file_hashes=?, verified_at=NULL WHERE id=?`,
+    ).run(
+      content,
+      title,
+      type,
+      ticket,
+      JSON.stringify(files),
+      hash,
+      SCORE_FRESH,
+      JSON.stringify(fileHashes),
+      id,
+    );
     db.prepare('UPDATE memories_fts SET content=?, title=? WHERE memory_id=?').run(
       content,
       title,
       id,
     );
   });
-  return { ...prev, content, title, type, ticket, files, contentHash: hash };
+  return {
+    ...prev,
+    content,
+    title,
+    type,
+    ticket,
+    files,
+    contentHash: hash,
+    score: SCORE_FRESH,
+    needsReverify: false,
+    fileHashes,
+    verifiedAt: null,
+  };
+}
+
+// ── Veracity: verify, stale-flagging ─────────────────────────────────────────
+
+/**
+ * Record the agent's veracity judgment of a memory against its (current) files.
+ * `pass` → score +1 (cap 5), clear needs-reverify, re-stamp every file hash, set
+ * verified_at. `!pass` → tombstone (score 0, reason, removed from search) so it stops
+ * being surfaced and the re-learn guard blocks re-storing it. Returns null if unknown;
+ * a no-op (returns the record) if already tombstoned.
+ */
+export function verifyMemory(
+  db: DatabaseSync,
+  id: string,
+  pass: boolean,
+  root: string,
+  reason?: string,
+): MemoryRecord | null {
+  const cur = queryOne<MemRow>(db, 'SELECT * FROM memories WHERE id = ?', id);
+  if (!cur) return null;
+  const prev = rowToRecord(cur);
+  if (prev.status === 'tombstoned') return prev;
+  if (pass) {
+    const fileHashes = hashFiles(root, prev.files);
+    const score = Math.min(SCORE_MAX, prev.score + 1);
+    const verifiedAt = new Date().toISOString();
+    tx(db, () => {
+      db.prepare(
+        'UPDATE memories SET score=?, needs_reverify=0, file_hashes=?, verified_at=? WHERE id=?',
+      ).run(score, JSON.stringify(fileHashes), verifiedAt, id);
+    });
+    return { ...prev, score, needsReverify: false, fileHashes, verifiedAt };
+  }
+  const tombstoneReason = reason ?? 'refuted on verification';
+  tx(db, () => {
+    db.prepare(
+      "UPDATE memories SET status='tombstoned', score=0, needs_reverify=0, tombstone_reason=? WHERE id=?",
+    ).run(tombstoneReason, id);
+    db.prepare('DELETE FROM memories_fts WHERE memory_id=?').run(id);
+  });
+  return { ...prev, status: 'tombstoned', score: 0, needsReverify: false, tombstoneReason };
+}
+
+/**
+ * A file was edited: flag every ACTIVE memory referencing it whose stored hash no
+ * longer matches — set needs-reverify, cap score at 2 (out of the inject bands), and
+ * re-stamp that file's hash. Returns how many were flagged. Deterministic; the agent
+ * does the actual re-judgment later.
+ */
+export function flagStaleForFile(db: DatabaseSync, root: string, relPath: string): number {
+  const rows = queryAll<MemRow>(
+    db,
+    "SELECT * FROM memories WHERE status='active' AND EXISTS (SELECT 1 FROM json_each(files_json) WHERE value = ?)",
+    relPath,
+  );
+  const current = hashFile(root, relPath);
+  let flagged = 0;
+  for (const r of rows) {
+    const stored = parseFileHashes(r.file_hashes) ?? {};
+    if (stored[relPath] === current) continue; // this memory already knows this version
+    const merged = { ...stored, [relPath]: current };
+    db.prepare('UPDATE memories SET needs_reverify=1, score=?, file_hashes=? WHERE id=?').run(
+      Math.min(r.score, SCORE_STALE_CAP),
+      JSON.stringify(merged),
+      r.id,
+    );
+    flagged++;
+  }
+  return flagged;
+}
+
+/**
+ * Out-of-band safety net (e.g. a git pull the Write hook never saw): scan a
+ * collection's active, not-yet-flagged memories and flag any whose files changed.
+ */
+export function reconcileStale(db: DatabaseSync, root: string, collectionId: string): number {
+  const rows = queryAll<MemRow>(
+    db,
+    "SELECT * FROM memories WHERE collection_id=? AND status='active' AND needs_reverify=0",
+    collectionId,
+  );
+  let flagged = 0;
+  for (const r of rows) {
+    if (!anyFileChanged(root, parseFileHashes(r.file_hashes))) continue;
+    const files = JSON.parse(r.files_json || '[]') as string[];
+    db.prepare('UPDATE memories SET needs_reverify=1, score=?, file_hashes=? WHERE id=?').run(
+      Math.min(r.score, SCORE_STALE_CAP),
+      JSON.stringify(hashFiles(root, files)),
+      r.id,
+    );
+    flagged++;
+  }
+  return flagged;
 }
 
 /** Delete a memory; returns false when the id is unknown. */
@@ -392,13 +567,19 @@ export interface QueryOpts {
   file?: string;
   since?: string;
   limit?: number;
+  /** Minimum veracity score (inclusive) — used to band-gate injection. */
+  minScore?: number;
+  /** Include tombstoned memories (default false). */
+  includeTombstoned?: boolean;
 }
 
-export type QueryHit = MemoryRecord & { score?: number };
+/** A search hit: the memory plus its BM25 relevance (separate from its veracity `score`). */
+export type QueryHit = MemoryRecord & { bm25?: number };
 
 /**
- * Retrieve within a collection: free-text BM25 match (when `text` given) plus any
- * of the metadata filters, newest-first when there is no text. `limit` defaults to 10.
+ * Retrieve within a collection: free-text BM25 match (when `text` given) plus any of
+ * the metadata filters, newest-first when there is no text. Excludes tombstoned by
+ * default and can band-gate by `minScore`. `limit` defaults to 10.
  */
 export function queryMemories(db: DatabaseSync, collectionId: string, opts: QueryOpts): QueryHit[] {
   const limit = opts.limit && opts.limit > 0 ? opts.limit : 10;
@@ -408,8 +589,10 @@ export function queryMemories(db: DatabaseSync, collectionId: string, opts: Quer
     filters.push(clause);
     params.push(param);
   };
+  if (!opts.includeTombstoned) filters.push("m.status = 'active'");
   if (opts.type) addFilter('m.type = ?', opts.type);
   if (opts.ticket) addFilter('m.ticket = ?', opts.ticket);
+  if (opts.minScore != null) addFilter('m.score >= ?', opts.minScore);
   // Match the path against actual array ELEMENTS (json_each), not the raw JSON text,
   // so brackets/quotes/other paths can't cause a false hit — but still a substring so
   // a basename or partial path matches.
@@ -425,21 +608,22 @@ export function queryMemories(db: DatabaseSync, collectionId: string, opts: Quer
     // Weight the title column above content (memory_id is UNINDEXED → weight 0). Pull a
     // pool of the strongest BM25 matches, then re-rank in JS with a gentle recency
     // penalty so a newer, equally-relevant memory wins — text relevance still dominates.
+    // NB: alias is `bm25`, NOT `score` — `score` is now the veracity column on m.*.
     const pool = Math.max(limit * 3, 30);
-    const sql = `SELECT m.*, bm25(memories_fts, 0.0, 1.0, 2.0) AS score
+    const sql = `SELECT m.*, bm25(memories_fts, 0.0, 1.0, 2.0) AS bm25
       FROM memories_fts f JOIN memories m ON m.id = f.memory_id
       WHERE memories_fts MATCH ? AND ${filters.join(' AND ')}
-      ORDER BY score ASC LIMIT ?`;
+      ORDER BY bm25 ASC LIMIT ?`;
     const rows = queryAll<MemRow>(db, sql, fts, ...params, pool);
     const now = Date.now();
     return rows
       .map((r) => {
         const ageDays = Math.max(0, (now - Date.parse(r.created_at)) / 86_400_000);
-        return { r, blended: (r.score ?? 0) + 0.03 * ageDays };
+        return { r, blended: (r.bm25 ?? 0) + 0.03 * ageDays };
       })
       .sort((a, b) => a.blended - b.blended)
       .slice(0, limit)
-      .map(({ r }) => ({ ...rowToRecord(r), score: r.score }));
+      .map(({ r }) => ({ ...rowToRecord(r), bm25: r.bm25 }));
   }
   // rowid (insertion order) breaks created_at ties so "newest-first" is deterministic
   // even for inserts that land in the same millisecond.
@@ -460,16 +644,18 @@ export function exportMemories(
   collectionId: string,
   type?: MemoryType,
 ): MemoryRecord[] {
+  // Export only ACTIVE memories — tombstoned (refuted) knowledge must not travel to
+  // another store where it would re-import as fresh, defeating the refutation.
   const rows = type
     ? queryAll<MemRow>(
         db,
-        'SELECT * FROM memories WHERE collection_id = ? AND type = ? ORDER BY created_at ASC',
+        "SELECT * FROM memories WHERE collection_id = ? AND status='active' AND type = ? ORDER BY created_at ASC",
         collectionId,
         type,
       )
     : queryAll<MemRow>(
         db,
-        'SELECT * FROM memories WHERE collection_id = ? ORDER BY created_at ASC',
+        "SELECT * FROM memories WHERE collection_id = ? AND status='active' ORDER BY created_at ASC",
         collectionId,
       );
   return rows.map(rowToRecord);
@@ -489,6 +675,7 @@ export function importMemories(
   db: DatabaseSync,
   collectionId: string,
   records: MemoryImportRecord[],
+  root: string,
   type?: MemoryType,
 ): ImportResult {
   let added = 0;
@@ -496,6 +683,7 @@ export function importMemories(
   for (const r of records) {
     if (type && r.type !== type) continue;
     const hash = contentHash(r.content);
+    // Skip both an existing active dupe AND a tombstoned match (re-learn guard).
     const dupe = db
       .prepare('SELECT id FROM memories WHERE collection_id = ? AND content_hash = ?')
       .get(collectionId, hash);
@@ -511,6 +699,7 @@ export function importMemories(
       files: r.files,
       createdAt: r.createdAt ?? new Date().toISOString(),
       hash,
+      fileHashes: hashFiles(root, r.files),
     });
     added++;
   }

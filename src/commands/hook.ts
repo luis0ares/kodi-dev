@@ -1,16 +1,19 @@
 import { existsSync } from 'node:fs';
+import { isAbsolute, relative } from 'node:path';
 import { Command } from 'commander';
 import { ORCHESTRATOR_BOOTSTRAP } from '../bootstrap.js';
-import { ragDbPath } from '../config.js';
+import { findProjectRoot, ragDbPath } from '../config.js';
 import { openDb } from '../memory/db.js';
 import {
+  flagStaleForFile,
   insertMemory,
   lookupCollection,
   queryMemories,
-  recentMemories,
+  reconcileStale,
   resolveCollection,
 } from '../memory/store.js';
-import { MemoryDraftSchema } from '../memory/template.js';
+import { MemoryDraftSchema, type MemoryRecord } from '../memory/template.js';
+import { AUTO_INJECT_MIN, RELEVANCE_MIN } from '../memory/veracity.js';
 
 /** Read the JSON a Claude Code hook passes on stdin; {} on empty/invalid/TTY. */
 function readHookInput(): Promise<Record<string, unknown>> {
@@ -49,43 +52,51 @@ function withReadDb<T>(fallback: T, fn: (db: ReturnType<typeof openDb>) => T): T
   }
 }
 
-/** Render a memory as a one-line `- [type] TICKET title` bullet. */
-function bullet(m: { type: string; ticket: string | null; title: string }): string {
-  return `- [${m.type}] ${m.ticket ? m.ticket + ' ' : ''}${m.title}`;
+/** Render a memory as a one-line `- Nscore★ [type] TICKET title` bullet. */
+function bullet(m: MemoryRecord): string {
+  return `- ${m.score}★ [${m.type}] ${m.ticket ? m.ticket + ' ' : ''}${m.title}`;
 }
 
 /**
- * A compact digest of this project's recent memories, appended to the SessionStart
- * context so past findings re-enter each session. Strictly read-only and best-effort:
- * if there is no DB, no collection, or no memories, it contributes nothing.
+ * A compact digest of this project's TRUSTED memories (score ≥ 4), appended to the
+ * SessionStart context. First runs the out-of-band reconcile (catch a git pull the
+ * Write hook never saw), then injects only auto-band findings. Best-effort.
  */
 function memoryDigest(): string {
   return withReadDb('', (db) => {
     const col = lookupCollection(db);
     if (!col) return '';
-    const recent = recentMemories(db, col.collection, 5);
+    try {
+      reconcileStale(db, findProjectRoot(), col.collection);
+    } catch {
+      /* reconcile is best-effort */
+    }
+    const recent = queryMemories(db, col.collection, { minScore: AUTO_INJECT_MIN, limit: 5 });
     if (recent.length === 0) return '';
     return (
       `\n\n## Project memory (kodi)\n\n` +
-      `Recent findings for this project — query more with \`kodi memory query <text>\` ` +
-      `and store new ones with \`kodi memory store\`:\n\n${recent.map(bullet).join('\n')}\n`
+      `Trusted findings (score ≥ ${AUTO_INJECT_MIN}) for this project — query more with ` +
+      `\`kodi memory query <text>\`, and \`kodi memory verify <id>\` when a finding is confirmed/refuted:` +
+      `\n\n${recent.map(bullet).join('\n')}\n`
     );
   });
 }
 
 /**
- * Memories relevant to the just-submitted prompt, formatted as a small, token-budgeted
- * injection. Pure lexical FTS — no LLM, no network. Best-effort and read-only: returns
- * '' (inject nothing) when there is no DB, no collection, a trivial prompt, or no hit.
+ * Memories relevant to the just-submitted prompt (score ≥ 3), token-budgeted. Pure
+ * lexical FTS — no LLM. Best-effort; returns '' when nothing trusted+relevant is found.
  */
 function promptInjection(prompt: string, cwd: string): string {
   if (!prompt.trim()) return '';
   return withReadDb('', (db) => {
     const col = lookupCollection(db, cwd);
     if (!col) return '';
-    // Keep it tight: the top few relevant memories, capped by a small char budget
-    // (~300 tokens) so per-prompt injection never bloats context.
-    const hits = queryMemories(db, col.collection, { text: prompt, limit: 3 });
+    // Only trustworthy (≥ 3) memories, top few, capped by a small char budget (~300 tok).
+    const hits = queryMemories(db, col.collection, {
+      text: prompt,
+      minScore: RELEVANCE_MIN,
+      limit: 3,
+    });
     const lines: string[] = [];
     let used = 0;
     for (const m of hits) {
@@ -121,44 +132,38 @@ export function parseVulnerabilities(command: string): string[] {
   return out;
 }
 
-/** The ticket key of a `kodi tickets hand-off <key>` command, else null. */
-export function parseHandoffKey(command: string): string | null {
-  const m = command.match(/\bkodi\s+tickets\s+hand-off\s+([^\s'"]+)/);
+/** The repo-relative report path embedded in a vulnerability string, else null. */
+export function parseVulnFile(vuln: string): string | null {
+  const m = vuln.match(/([A-Za-z0-9_.\-/]+\/[A-Za-z0-9_.\-]+\.[A-Za-z0-9]+)/);
   return m ? m[1] : null;
 }
 
 /**
- * Deterministically capture durable artifacts from a kodi command — no LLM, no
- * transcript parsing. Captures: the security findings on a `kodi pr create
- * --vulnerability …` (as `gotcha`, always — a vuln is a fact regardless of dry-run),
- * and a `kodi tickets hand-off <key>` slice-completion milestone (as `task-note`, but
- * ONLY on a real run — `dryRun` skips it so a preview isn't remembered as done).
+ * Deterministically capture security findings from a `kodi pr create --vulnerability …`
+ * as `gotcha` memories — no LLM. Each finding must carry a file (memories require one),
+ * so we capture only vulns whose string embeds a report path (which kodi's own format
+ * does). Hand-off capture was dropped: a hand-off has no file to verify against.
  * Deduped/idempotent. Best-effort: never throws.
  */
-function captureFromCommand(command: string, cwd: string, dryRun: boolean): void {
+function captureFromCommand(command: string, cwd: string, root: string): void {
   try {
     const vulns = parseVulnerabilities(command);
-    const handoff = dryRun ? null : parseHandoffKey(command);
-    if (vulns.length === 0 && !handoff) return;
+    if (vulns.length === 0) return;
     const db = openDb();
     try {
       const col = resolveCollection(db, cwd);
       for (const v of vulns) {
-        insertMemory(
-          db,
-          col.collection,
-          MemoryDraftSchema.parse({ content: `Security finding: ${v}`, type: 'gotcha' }),
-        );
-      }
-      if (handoff) {
+        const file = parseVulnFile(v);
+        if (!file) continue; // no file -> not storable
         insertMemory(
           db,
           col.collection,
           MemoryDraftSchema.parse({
-            content: `Ticket ${handoff} handed off to review — slice complete, PR opened.`,
-            type: 'task-note',
-            ticket: handoff,
+            content: `Security finding: ${v}`,
+            type: 'gotcha',
+            files: [file],
           }),
+          root,
         );
       }
     } finally {
@@ -166,6 +171,25 @@ function captureFromCommand(command: string, cwd: string, dryRun: boolean): void
     }
   } catch {
     /* capture is best-effort; a hook must never fail the tool call */
+  }
+}
+
+/**
+ * A file was written/edited: flag memories linked to it as needs-reverify (cheap +
+ * deterministic; the agent re-judges later). Best-effort; never throws.
+ */
+function flagStaleForEdit(filePath: string, root: string): void {
+  try {
+    if (!existsSync(ragDbPath())) return;
+    const rel = isAbsolute(filePath) ? relative(root, filePath) : filePath;
+    const db = openDb();
+    try {
+      flagStaleForFile(db, root, rel);
+    } finally {
+      db.close();
+    }
+  } catch {
+    /* best-effort */
   }
 }
 
@@ -212,17 +236,19 @@ export function registerHookCommand(program: Command) {
 
   hook
     .command('post-tool-use')
-    .description('Deterministically capture kodi artifacts into memory (PostToolUse)')
+    .description('Capture security findings + flag file-edited memories stale (PostToolUse)')
     .action(async () => {
       const input = await readHookInput();
       const toolInput = (input.tool_input ?? {}) as Record<string, unknown>;
-      const command = typeof toolInput.command === 'string' ? toolInput.command : '';
       const cwd = typeof input.cwd === 'string' ? input.cwd : process.cwd();
-      // A kodi mutation prints "[dry-run] …" when not executed (no --yes). Detect it
-      // from the tool response so a previewed hand-off isn't captured as completed.
-      const dryRun = JSON.stringify(input.tool_response ?? '').includes('[dry-run]');
-      if (command) captureFromCommand(command, cwd, dryRun);
-      // Capture is a pure side effect — emit nothing.
+      const root = findProjectRoot(cwd);
+      // Bash: capture security findings from a kodi pr create.
+      const command = typeof toolInput.command === 'string' ? toolInput.command : '';
+      if (command) captureFromCommand(command, cwd, root);
+      // Write/Edit: flag memories linked to the edited file as needs-reverify.
+      const filePath = typeof toolInput.file_path === 'string' ? toolInput.file_path : '';
+      if (filePath) flagStaleForEdit(filePath, root);
+      // Pure side effect — emit nothing.
     });
 
   return hook;

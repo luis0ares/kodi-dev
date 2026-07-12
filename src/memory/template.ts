@@ -30,12 +30,18 @@ export const MemoryDraftSchema = z.object({
     .min(1)
     .nullish()
     .transform((v) => v ?? null),
-  /** Repo-relative paths the finding touches (0..N). Names are derived, not stored. */
-  files: z.array(z.string().trim().min(1)).default([]),
+  /**
+   * Repo-relative paths the finding touches — at least one is REQUIRED: the veracity
+   * loop verifies a memory against its files, so a memory with no file can't be scored.
+   */
+  files: z.array(z.string().trim().min(1)).min(1, 'at least one --file is required'),
   /** Optional display title; a preview of `content` is derived when omitted. */
   title: z.string().trim().min(1).optional(),
 });
 export type MemoryDraft = z.infer<typeof MemoryDraftSchema>;
+
+/** A memory's lifecycle status. */
+export type MemoryStatus = 'active' | 'tombstoned';
 
 /** A stored memory: a validated draft plus its identity and provenance. */
 export interface MemoryRecord {
@@ -51,6 +57,18 @@ export interface MemoryRecord {
   createdAt: string;
   /** sha256 of the normalized content — the dedup key within a collection. */
   contentHash: string;
+  // ── veracity (see docs/memory-veracity-score.md) ──
+  /** Trust score 0–5; fresh = 3. Rises when a linked file changes and it still holds. */
+  score: number;
+  status: MemoryStatus;
+  /** True when a linked file changed and the agent hasn't re-verified yet. */
+  needsReverify: boolean;
+  /** sha256 per linked file at last verification: `{ path: hash }`. */
+  fileHashes: Record<string, string> | null;
+  /** ISO-8601 UTC of the last successful verify (null if never). */
+  verifiedAt: string | null;
+  /** Why it was tombstoned (null when active). */
+  tombstoneReason: string | null;
 }
 
 /**
@@ -67,7 +85,7 @@ export const MemoryImportRecordSchema = z.object({
     .min(1)
     .nullish()
     .transform((v) => v ?? null),
-  files: z.array(z.string().trim().min(1)).default([]),
+  files: z.array(z.string().trim().min(1)).min(1, 'at least one file is required'),
   title: z.string().trim().min(1).optional(),
   /** Preserved when present so an export→import keeps the original timestamp. */
   createdAt: z.string().trim().min(1).optional(),
