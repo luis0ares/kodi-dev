@@ -4,7 +4,13 @@ import { join } from 'node:path';
 import { Command } from 'commander';
 import { loadBoardConfig } from '../config.js';
 import { execMutate, execRead } from '../exec.js';
-import { PrSchema, renderPrHtml, renderPrMarkdown, type Pr } from '../templates/pr.js';
+import {
+  assertWithinBodyLimit,
+  PrSchema,
+  renderPrHtml,
+  renderPrMarkdown,
+  type Pr,
+} from '../templates/pr.js';
 
 type Target = 'github' | 'azure';
 
@@ -27,6 +33,7 @@ function draftFromOptions(o: Record<string, unknown>): Pr {
     fixes: o.fix ?? [],
     improvements: o.improvement ?? [],
     includedChanges: o.change ?? [],
+    vulnerabilities: o.vulnerability ?? [],
     relatedIssues: o.issue ?? [],
     notes: o.notes,
     reviewers: o.reviewer ?? [],
@@ -97,6 +104,12 @@ export function registerPrCommand(program: Command) {
     .option('--fix <text>', 'fix (repeatable)', collect, [])
     .option('--improvement <text>', 'improvement (repeatable)', collect, [])
     .option('--change <text>', 'included change (repeatable)', collect, [])
+    .option(
+      '--vulnerability <ref>',
+      'security vulnerability the slice surfaced, referencing its report (repeatable)',
+      collect,
+      [],
+    )
     .option('--issue <ref>', 'related issue (repeatable)', collect, [])
     .option('--reviewer <name>', 'reviewer (repeatable)', collect, [])
     .option('--notes <text>')
@@ -109,10 +122,14 @@ export function registerPrCommand(program: Command) {
       const draft = draftFromOptions(o);
       const target = resolveTarget(o.provider);
       const repo = o.repository ?? loadBoardConfig().repository;
+      // Enforce the 4000-char ceiling on the canonical markdown body before we
+      // hand anything to gh/az — refuse rather than let a provider reject/truncate.
+      const body = renderPrMarkdown(draft);
+      assertWithinBodyLimit(body);
       let args: string[];
       if (target === 'github') {
         const bodyFile = join(mkdtempSync(join(tmpdir(), 'kodi-pr-')), 'body.md');
-        writeFileSync(bodyFile, renderPrMarkdown(draft), 'utf-8');
+        writeFileSync(bodyFile, body, 'utf-8');
         args = githubCreateArgs(draft, bodyFile, o.source, o.target, repo);
       } else {
         args = azureCreateArgs(draft, renderPrHtml(draft), o.source, o.target, repo);
