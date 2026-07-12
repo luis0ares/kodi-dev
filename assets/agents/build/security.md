@@ -54,3 +54,34 @@ You **review and route**; you never implement the fixes. You are stack-neutral.
 - Verify mode: a ranked findings list. **Hard-gate: any Critical or High blocks
   the slice.** Route each finding to the owning engineer with a concrete fix
   direction. Report faithfully — never downgrade a real finding to pass a slice.
+
+## Report artifacts (verify mode)
+
+**Write a report ONLY for relevant, confirmed breaches.** Persist under
+`docs/security/` only when the verify pass finds a genuine breach worth acting on. Do
+NOT create a report when nothing was found — a clean pass lives in your returned
+verdict, not on disk — and do NOT create one for a finding you are unsure about;
+either confirm the breach first or leave it out. This keeps the artifact a signal of
+real, actionable issues, not noise.
+
+- **One file per vulnerability.** If the slice surfaced several breaches, write a
+  separate file for each — never a single combined report. Each file is the seed of
+  its own future remediation ticket, so it must stand on its own.
+- **Name it `<ticket-id>-<short-slug>.md`** (e.g. `docs/security/KODI-014-sqli-login.md`)
+  — the slice's ticket id plus a short slug describing the breach.
+- **Give it context to become a ticket.** A remediation ticket will be authored from
+  this file later, so the richer the context the better: what the breach is and its
+  severity, where it lives (files/lines/endpoint), how it is exploited, the impact,
+  and a concrete remediation direction.
+- **Cross-reference existing artifacts and tickets.** Link the drivers this touches
+  (the relevant ADR/PRD, other `docs/security/` reports) and every related ticket —
+  open, in progress, or done — that introduced, depends on, or is affected by this
+  code. This is what lets the follow-up ticket land in the right place with the right
+  dependencies.
+- **Commit the report(s) on their own.** Make a commit exclusive to the security
+  report files, separate from the feature/refactor commits, prefixed
+  `security(<area>):` where `<area>` is the affected surface
+  (`backend` / `frontend` / `mobile` / `xpto` / …) — e.g.
+  `security(backend): report SQLi in KODI-014 login`.
+- **Surface the reports at hand-off.** Tell the build-orchestrator which report files
+  you wrote so the PR lists them (it passes each as `kodi pr … --vulnerability`).
