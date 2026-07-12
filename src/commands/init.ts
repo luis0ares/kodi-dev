@@ -45,14 +45,29 @@ interface HookEntry {
   hooks: Array<{ type: string; command: string }>;
 }
 
+/**
+ * Idempotently add one command hook under `event`, with an optional tool `matcher`.
+ * Returns false when that command is already wired (so a re-run never duplicates it).
+ * Shared by the per-event merge functions below.
+ */
+function addHookOnce(
+  settings: { hooks?: Record<string, HookEntry[]> },
+  event: string,
+  command: string,
+  matcher?: string,
+): boolean {
+  const hooks = (settings.hooks ??= {});
+  const arr = (hooks[event] ??= []);
+  if (arr.some((e) => e.hooks?.some((h) => h.command === command))) return false;
+  const entry: HookEntry = { hooks: [{ type: 'command', command }] };
+  if (matcher) entry.matcher = matcher;
+  arr.push(entry);
+  return true;
+}
+
 /** Idempotently merge the kodi SessionStart hook into a settings.json object. */
 export function mergeSessionStartHook(settings: Record<string, any>): boolean {
-  settings.hooks ??= {};
-  const arr: HookEntry[] = (settings.hooks.SessionStart ??= []);
-  const already = arr.some((e) => e.hooks?.some((h) => h.command === HOOK_COMMAND));
-  if (already) return false;
-  arr.push({ matcher: SESSION_MATCHER, hooks: [{ type: 'command', command: HOOK_COMMAND }] });
-  return true;
+  return addHookOnce(settings, 'SessionStart', HOOK_COMMAND, SESSION_MATCHER);
 }
 
 /**
@@ -60,12 +75,7 @@ export function mergeSessionStartHook(settings: Record<string, any>): boolean {
  * to each prompt (pure FTS, no LLM). No matcher — UserPromptSubmit is not a tool event.
  */
 export function mergeUserPromptSubmitHook(settings: Record<string, any>): boolean {
-  settings.hooks ??= {};
-  const arr: HookEntry[] = (settings.hooks.UserPromptSubmit ??= []);
-  const already = arr.some((e) => e.hooks?.some((h) => h.command === UPS_COMMAND));
-  if (already) return false;
-  arr.push({ hooks: [{ type: 'command', command: UPS_COMMAND }] });
-  return true;
+  return addHookOnce(settings, 'UserPromptSubmit', UPS_COMMAND);
 }
 
 /**
@@ -74,12 +84,7 @@ export function mergeUserPromptSubmitHook(settings: Record<string, any>): boolea
  * `kodi pr create`) into memory — no LLM, pure side effect.
  */
 export function mergePostToolUseHook(settings: Record<string, any>): boolean {
-  settings.hooks ??= {};
-  const arr: HookEntry[] = (settings.hooks.PostToolUse ??= []);
-  const already = arr.some((e) => e.hooks?.some((h) => h.command === PTU_COMMAND));
-  if (already) return false;
-  arr.push({ matcher: 'Bash', hooks: [{ type: 'command', command: PTU_COMMAND }] });
-  return true;
+  return addHookOnce(settings, 'PostToolUse', PTU_COMMAND, 'Bash');
 }
 
 /**
