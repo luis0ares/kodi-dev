@@ -29,10 +29,10 @@ hook additions that qualify:
 
 - **SessionStart digest** — *already shipped* (`kodi hook session-start`); becomes the
   layered digest in §4.3 as retrieval quality improves.
-- **UserPromptSubmit injection** — a new `kodi hook user-prompt-submit` that runs a
-  plain `kodi memory query` on the user's prompt and injects a small, token-budgeted,
-  deduped set of relevant memories. Pure FTS, no LLM. **This is the recommended next
-  hook.**
+- **UserPromptSubmit injection** — *shipped* (`kodi hook user-prompt-submit`): runs a
+  plain `kodi memory query` on the prompt and injects the top relevant memories within
+  a ~300-token budget; silent on a trivial prompt or no hit. Pure FTS, no LLM. Wired by
+  `kodi init` alongside the SessionStart digest.
 - **Deterministic capture on structured events** — a `PostToolUse` hook that stores a
   memory when kodi itself emits a durable artifact (ticket hand-off, security report,
   ADR). No transcript summarization, no `claude -p`.
