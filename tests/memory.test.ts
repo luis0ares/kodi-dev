@@ -16,6 +16,7 @@ import {
   removeMemory,
   resolveCollection,
 } from '../src/memory/store.js';
+import { parseVulnerabilities } from '../src/commands/hook.js';
 import { contentHash, MemoryDraftSchema } from '../src/memory/template.js';
 
 const COL = 'test-col';
@@ -236,6 +237,24 @@ describe('concurrency (shared DB, parallel sessions)', () => {
     } finally {
       db2.close();
     }
+  });
+});
+
+describe('PostToolUse capture parsing', () => {
+  it('extracts --vulnerability values (quoted/unquoted) only from `kodi pr create`', () => {
+    const cmd =
+      'kodi pr create --title x --vulnerability "CRITICAL — SQLi (docs/security/a.md)" ' +
+      "--vulnerability 'HIGH — authz (docs/security/b.md)' --source f --target main";
+    expect(parseVulnerabilities(cmd)).toEqual([
+      'CRITICAL — SQLi (docs/security/a.md)',
+      'HIGH — authz (docs/security/b.md)',
+    ]);
+  });
+
+  it('captures nothing for non-pr-create commands or when no --vulnerability is present', () => {
+    expect(parseVulnerabilities('kodi tickets list --json')).toEqual([]);
+    expect(parseVulnerabilities('kodi pr create --title x --source f --target main')).toEqual([]);
+    expect(parseVulnerabilities('echo --vulnerability "not a kodi pr"')).toEqual([]);
   });
 });
 

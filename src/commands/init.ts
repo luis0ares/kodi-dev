@@ -38,6 +38,7 @@ import { readlinePrompter, type Prompter } from '../prompt.js';
 const HOOK_COMMAND = 'kodi hook session-start';
 const SESSION_MATCHER = 'startup|resume|clear|compact';
 const UPS_COMMAND = 'kodi hook user-prompt-submit';
+const PTU_COMMAND = 'kodi hook post-tool-use';
 
 interface HookEntry {
   matcher?: string;
@@ -64,6 +65,20 @@ export function mergeUserPromptSubmitHook(settings: Record<string, any>): boolea
   const already = arr.some((e) => e.hooks?.some((h) => h.command === UPS_COMMAND));
   if (already) return false;
   arr.push({ hooks: [{ type: 'command', command: UPS_COMMAND }] });
+  return true;
+}
+
+/**
+ * Idempotently merge the kodi PostToolUse hook (matcher `Bash`), which deterministically
+ * captures durable artifacts from kodi commands (e.g. security findings on a
+ * `kodi pr create`) into memory — no LLM, pure side effect.
+ */
+export function mergePostToolUseHook(settings: Record<string, any>): boolean {
+  settings.hooks ??= {};
+  const arr: HookEntry[] = (settings.hooks.PostToolUse ??= []);
+  const already = arr.some((e) => e.hooks?.some((h) => h.command === PTU_COMMAND));
+  if (already) return false;
+  arr.push({ matcher: 'Bash', hooks: [{ type: 'command', command: PTU_COMMAND }] });
   return true;
 }
 
@@ -212,12 +227,14 @@ export function installHarness(root: string, opts: InstallOptions = {}): string[
     : {};
   const hookChanged = mergeSessionStartHook(settings);
   const upsChanged = mergeUserPromptSubmitHook(settings);
+  const ptuChanged = mergePostToolUseHook(settings);
   const permsChanged = mergePermissions(settings);
-  if (hookChanged || upsChanged || permsChanged) {
+  if (hookChanged || upsChanged || ptuChanged || permsChanged) {
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
     const parts = [
       hookChanged ? 'SessionStart hook' : null,
       upsChanged ? 'UserPromptSubmit hook' : null,
+      ptuChanged ? 'PostToolUse hook' : null,
       permsChanged ? 'permissions' : null,
     ]
       .filter(Boolean)

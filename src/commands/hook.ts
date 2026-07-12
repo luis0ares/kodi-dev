@@ -3,7 +3,14 @@ import { Command } from 'commander';
 import { ORCHESTRATOR_BOOTSTRAP } from '../bootstrap.js';
 import { ragDbPath } from '../config.js';
 import { openDb } from '../memory/db.js';
-import { lookupCollection, queryMemories, recentMemories } from '../memory/store.js';
+import {
+  insertMemory,
+  lookupCollection,
+  queryMemories,
+  recentMemories,
+  resolveCollection,
+} from '../memory/store.js';
+import { MemoryDraftSchema } from '../memory/template.js';
 
 /** Read the JSON a Claude Code hook passes on stdin; {} on empty/invalid/TTY. */
 function readHookInput(): Promise<Record<string, unknown>> {
@@ -92,6 +99,51 @@ function promptInjection(prompt: string, cwd: string): string {
 }
 
 /**
+ * Extract the values of every `--vulnerability` flag from a `kodi pr create` command
+ * string (double / single / unquoted). These are security findings the slice
+ * surfaced — durable facts worth remembering whether or not the PR actually opened
+ * (dry-run included), so capturing them here is unambiguous.
+ */
+export function parseVulnerabilities(command: string): string[] {
+  if (!/\bkodi\s+pr\s+create\b/.test(command)) return [];
+  const out: string[] = [];
+  const re = /--vulnerability(?:=|\s+)(?:"([^"]*)"|'([^']*)'|(\S+))/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(command))) {
+    const v = (m[1] ?? m[2] ?? m[3] ?? '').trim();
+    if (v) out.push(v);
+  }
+  return out;
+}
+
+/**
+ * Deterministically capture durable artifacts from a kodi command — no LLM, no
+ * transcript parsing. v1 captures the security findings listed on a `kodi pr create`
+ * as `gotcha` memories (deduped/idempotent). Best-effort: never throws.
+ */
+function captureFromCommand(command: string, cwd: string): void {
+  try {
+    const vulns = parseVulnerabilities(command);
+    if (vulns.length === 0) return;
+    const db = openDb();
+    try {
+      const col = resolveCollection(db, cwd);
+      for (const v of vulns) {
+        insertMemory(
+          db,
+          col.collection,
+          MemoryDraftSchema.parse({ content: `Security finding: ${v}`, type: 'gotcha' }),
+        );
+      }
+    } finally {
+      db.close();
+    }
+  } catch {
+    /* capture is best-effort; a hook must never fail the tool call */
+  }
+}
+
+/**
  * `kodi hook <event>` — emit the JSON a Claude Code hook expects on stdout.
  * `kodi init` wires SessionStart → `kodi hook session-start` and UserPromptSubmit →
  * `kodi hook user-prompt-submit`, so hook logic is versioned with the CLI instead of
@@ -130,6 +182,18 @@ export function registerHookCommand(program: Command) {
         },
       };
       process.stdout.write(JSON.stringify(payload));
+    });
+
+  hook
+    .command('post-tool-use')
+    .description('Deterministically capture kodi artifacts into memory (PostToolUse)')
+    .action(async () => {
+      const input = await readHookInput();
+      const toolInput = (input.tool_input ?? {}) as Record<string, unknown>;
+      const command = typeof toolInput.command === 'string' ? toolInput.command : '';
+      const cwd = typeof input.cwd === 'string' ? input.cwd : process.cwd();
+      if (command) captureFromCommand(command, cwd);
+      // Capture is a pure side effect — emit nothing.
     });
 
   return hook;

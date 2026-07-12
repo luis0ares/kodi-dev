@@ -381,16 +381,21 @@ export function queryMemories(db: DatabaseSync, collectionId: string, opts: Quer
   const limit = opts.limit && opts.limit > 0 ? opts.limit : 10;
   const filters = ['m.collection_id = ?'];
   const params: (string | number)[] = [collectionId];
-  if (opts.type) (filters.push('m.type = ?'), params.push(opts.type));
-  if (opts.ticket) (filters.push('m.ticket = ?'), params.push(opts.ticket));
+  const addFilter = (clause: string, param: string | number) => {
+    filters.push(clause);
+    params.push(param);
+  };
+  if (opts.type) addFilter('m.type = ?', opts.type);
+  if (opts.ticket) addFilter('m.ticket = ?', opts.ticket);
   // Match the path against actual array ELEMENTS (json_each), not the raw JSON text,
   // so brackets/quotes/other paths can't cause a false hit — but still a substring so
   // a basename or partial path matches.
-  if (opts.file) {
-    filters.push('EXISTS (SELECT 1 FROM json_each(m.files_json) WHERE value LIKE ?)');
-    params.push(`%${opts.file}%`);
-  }
-  if (opts.since) (filters.push('m.created_at >= ?'), params.push(opts.since));
+  if (opts.file)
+    addFilter(
+      'EXISTS (SELECT 1 FROM json_each(m.files_json) WHERE value LIKE ?)',
+      `%${opts.file}%`,
+    );
+  if (opts.since) addFilter('m.created_at >= ?', opts.since);
 
   const fts = opts.text ? toFtsQuery(opts.text) : null;
   if (fts) {

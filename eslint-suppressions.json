@@ -1,7 +1,7 @@
 {
   "src/commands/init.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 2
+      "count": 5
     }
   },
   "src/commands/tickets.ts": {

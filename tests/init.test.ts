@@ -7,6 +7,7 @@ import {
   configureBoard,
   installHarness,
   mergePermissions,
+  mergePostToolUseHook,
   mergeSessionStartHook,
   mergeUserPromptSubmitHook,
   PERMISSION_ALLOW,
@@ -120,6 +121,17 @@ describe('UserPromptSubmit hook merge', () => {
   });
 });
 
+describe('PostToolUse hook merge', () => {
+  it('adds the capture hook with a Bash matcher and is idempotent', () => {
+    const settings: Record<string, any> = {};
+    expect(mergePostToolUseHook(settings)).toBe(true);
+    expect(mergePostToolUseHook(settings)).toBe(false);
+    expect(settings.hooks.PostToolUse).toHaveLength(1);
+    expect(settings.hooks.PostToolUse[0].matcher).toBe('Bash');
+    expect(settings.hooks.PostToolUse[0].hooks[0].command).toBe('kodi hook post-tool-use');
+  });
+});
+
 describe('permissions merge', () => {
   it('adds the deny/allow defaults, is idempotent, and preserves existing rules', () => {
     const settings: Record<string, any> = { permissions: { deny: ['Bash(rm:*)'], allow: [] } };
@@ -200,11 +212,12 @@ describe('installHarness (files only)', () => {
     const settings = JSON.parse(readFileSync(join(dir, '.claude/settings.json'), 'utf-8'));
     expect(settings.permissions.deny).toEqual(expect.arrayContaining(PERMISSION_DENY));
     expect(settings.permissions.allow).toEqual(expect.arrayContaining(PERMISSION_ALLOW));
-    // both memory hooks are wired
+    // all three memory hooks are wired
     expect(settings.hooks.SessionStart[0].hooks[0].command).toBe('kodi hook session-start');
     expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe(
       'kodi hook user-prompt-submit',
     );
+    expect(settings.hooks.PostToolUse[0].hooks[0].command).toBe('kodi hook post-tool-use');
     for (const a of ['brief', 'architect', 'build-orchestrator']) {
       expect(existsSync(join(dir, '.claude/agents', `${a}.md`))).toBe(true);
     }
