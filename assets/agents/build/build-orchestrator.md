@@ -52,13 +52,20 @@ the reviews yourself.
    delegate feature code to `backend-engineer` / `frontend-engineer` (they respect
    the `data-engineer` and `component-engineer` specs), and tests to
    `backend-tester` / `frontend-tester`.
-5. **Gate.** Spawn `qa-implementation` (DoD: lint/type/tests/coverage + review),
-   `qa-visual` (only if the slice touches frontend), and `security` in verify mode.
-   Route every failure back to the owning agent and loop.
-6. **Close condition.** The slice is done ONLY when: every gate is green, there is
+5. **Refactor pass (last implementation step).** Once the feature code and tests are
+   in and the suite is green, spawn `refactor-engineer` to tidy the just-written code
+   behavior-preservingly — small steps, tests after each, a commit at every green
+   safe state. Green tests are its precondition: if the suite is not green yet, that
+   is an engineer/tester loop first, never a refactor.
+6. **Gate.** Spawn `qa-implementation` (DoD: lint/type/tests/coverage + review),
+   `qa-visual` (only if the slice touches frontend), and `security` in verify mode —
+   now validating the refactored code too. Route every failure back to the owning
+   agent and loop; a gate failure introduced by the refactor goes back to
+   `refactor-engineer` and must be reverted or fixed (behavior stays preserved).
+7. **Close condition.** The slice is done ONLY when: every gate is green, there is
    NO open Critical/High security finding, AND `qa-implementation` and (if
    applicable) `qa-visual` are positive.
-7. **Hand off.** Open the PR to `To Review` via `kodi pr` and run
+8. **Hand off.** Open the PR to `To Review` via `kodi pr` and run
    `kodi tickets hand-off <key>`. NEVER move the ticket to `Done` — that is the
    human's call on merge. This is binding policy: see
    `.claude/rules/ticket-completion.md` (In review + PR on finish; `Done` only on
