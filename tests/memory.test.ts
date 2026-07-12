@@ -173,6 +173,72 @@ describe('export / import (yaml round-trip)', () => {
   });
 });
 
+describe('retrieval quality', () => {
+  it('splits identifiers so camelCase queries match word-level content', () => {
+    store({ content: 'the pull request markdown renderer escapes hash refs' });
+    // "renderPrMarkdown" → render / pr / markdown, so it matches despite no literal token
+    const hits = queryMemories(db, COL, { text: 'renderPrMarkdown' });
+    expect(hits).toHaveLength(1);
+  });
+
+  it('prefix-matches longer terms for stem-ish recall', () => {
+    store({ content: 'this documents the autolinking behavior of GitHub' });
+    expect(queryMemories(db, COL, { text: 'autolink' })).toHaveLength(1); // autolink* ~ autolinking
+  });
+
+  it('blends recency so a newer equally-relevant memory ranks first', () => {
+    const older = store({ content: 'caching strategy notes', title: 'caching' });
+    // force an older timestamp on the first row
+    db.prepare('UPDATE memories SET created_at = ? WHERE id = ?').run(
+      '2020-01-01T00:00:00.000Z',
+      older.record.id,
+    );
+    const newer = store({ content: 'caching strategy revisited', title: 'caching' });
+    const hits = queryMemories(db, COL, { text: 'caching strategy' });
+    expect(hits[0].id).toBe(newer.record.id);
+  });
+
+  it('matches --file against real array elements, not JSON structure', () => {
+    store({ content: 'touches pr', files: ['src/templates/pr.ts'] });
+    store({ content: 'touches other', files: ['src/other.ts'] });
+    expect(queryMemories(db, COL, { file: 'templates/pr.ts' })).toHaveLength(1);
+    // a fragment that only appears as JSON punctuation must not match
+    expect(queryMemories(db, COL, { file: '","' })).toHaveLength(0);
+  });
+});
+
+describe('concurrency (shared DB, parallel sessions)', () => {
+  it('provisions the same collection from two connections without collision', () => {
+    const db2 = openDb(join(dir, 'rag.db'));
+    try {
+      const a = provisionCollection(db, '/repos/shared', 'shared');
+      const b = provisionCollection(db2, '/repos/shared', 'shared'); // second session, same root
+      expect(b.collection).toBe(a.collection); // converge, no UNIQUE throw
+      const rows = db
+        .prepare('SELECT COUNT(*) AS n FROM collections WHERE root_path = ?')
+        .get('/repos/shared') as unknown as { n: number };
+      expect(rows.n).toBe(1);
+    } finally {
+      db2.close();
+    }
+  });
+
+  it('sees a second connection’s committed writes (WAL) and keeps the FTS index consistent', () => {
+    const db2 = openDb(join(dir, 'rag.db'));
+    try {
+      insertMemory(
+        db2,
+        COL,
+        MemoryDraftSchema.parse({ content: 'written by session two', type: 'gotcha' }),
+      );
+      // the first connection can immediately query the other session's committed row
+      expect(queryMemories(db, COL, { text: 'session two' })).toHaveLength(1);
+    } finally {
+      db2.close();
+    }
+  });
+});
+
 describe('collection identity', () => {
   it('provisions a stable id per root and distinct ids per project', () => {
     const a = provisionCollection(db, '/repos/app', 'app');

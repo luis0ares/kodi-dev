@@ -57,10 +57,17 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
 export function openDb(path: string = ragDbPath()): DatabaseSync {
   mkdirSync(dirname(path), { recursive: true });
   const db = new nodeSqlite.DatabaseSync(path);
-  db.exec('PRAGMA journal_mode = WAL;');
-  db.exec('PRAGMA foreign_keys = ON;');
-  // Tolerate brief lock contention when several agents touch the shared DB at once.
+  // Arm busy_timeout FIRST: it makes SQLite wait (its own timed retry) for a lock
+  // instead of throwing SQLITE_BUSY. It must precede the WAL switch and the schema
+  // DDL below, since those take write locks and, under many parallel sessions
+  // opening at once, would otherwise throw before any wait is configured.
   db.exec('PRAGMA busy_timeout = 5000;');
+  // WAL lets many sessions read while one writes; NORMAL sync is safe under WAL and
+  // much faster. Together with BEGIN IMMEDIATE (see store `tx`) this is what makes
+  // the shared ~/.kodi DB safe across parallel sessions.
+  db.exec('PRAGMA journal_mode = WAL;');
+  db.exec('PRAGMA synchronous = NORMAL;');
+  db.exec('PRAGMA foreign_keys = ON;');
   db.exec(SCHEMA);
   return db;
 }

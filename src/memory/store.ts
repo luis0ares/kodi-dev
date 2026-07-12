@@ -20,12 +20,15 @@ import {
 export type Collection = MemoryBinding;
 
 /**
- * Run `fn` inside a single transaction so the `memories` table and its `memories_fts`
- * index never desync on a mid-write failure. Not nestable — callers must not wrap an
- * already-transactional op.
+ * Run `fn` inside a single write transaction so the `memories` table and its
+ * `memories_fts` index never desync on a mid-write failure. Uses `BEGIN IMMEDIATE`
+ * so the write lock is taken up front: with several sessions on the shared DB, a
+ * plain deferred `BEGIN` that reads then writes can deadlock on the read→write lock
+ * upgrade (which `busy_timeout` cannot resolve), whereas IMMEDIATE just waits for the
+ * writer slot. Not nestable — callers must not wrap an already-transactional op.
  */
 function tx<T>(db: DatabaseSync, fn: () => T): T {
-  db.exec('BEGIN');
+  db.exec('BEGIN IMMEDIATE');
   try {
     const result = fn();
     db.exec('COMMIT');
@@ -56,40 +59,43 @@ function shortHash(s: string): string {
   return createHash('sha256').update(s).digest('hex').slice(0, 6);
 }
 
+/**
+ * Idempotently ensure a collection row exists. `ON CONFLICT DO NOTHING` makes this
+ * race-safe: two sessions provisioning the same project at once can't collide on the
+ * `id` PK or the `root_path` UNIQUE — the loser's insert is simply a no-op.
+ */
 function ensureCollectionRow(
   db: DatabaseSync,
   id: string,
   name: string,
   root: string | null,
 ): void {
-  const existing = db.prepare('SELECT id FROM collections WHERE id = ?').get(id);
-  if (existing) return;
-  db.prepare('INSERT INTO collections (id, name, root_path, created_at) VALUES (?, ?, ?, ?)').run(
-    id,
-    name,
-    root,
-    new Date().toISOString(),
-  );
+  db.prepare(
+    'INSERT INTO collections (id, name, root_path, created_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING',
+  ).run(id, name, root, new Date().toISOString());
 }
 
 /**
  * Provision (or reuse) the collection for a project root, keyed by that root path so
  * it is stable across folder renames of the *display* name and shared by init and
  * the auto-provision path. The id is `<slug>-<shorthash(root)>`.
+ *
+ * Race-safe: insert-if-absent then read back the winning row by root, so two parallel
+ * sessions bootstrapping the same new project converge on one collection (whichever
+ * committed first) instead of one throwing a UNIQUE violation.
  */
 export function provisionCollection(
   db: DatabaseSync,
   root: string,
   preferredName?: string,
 ): Collection {
-  const existing = db
-    .prepare('SELECT id, name FROM collections WHERE root_path = ?')
-    .get(root) as unknown as { id: string; name: string } | undefined;
-  if (existing) return { collection: existing.id, name: existing.name };
   const name = slug(preferredName ?? basename(root));
   const id = `${name}-${shortHash(root)}`;
   ensureCollectionRow(db, id, name, root);
-  return { collection: id, name };
+  const row = db
+    .prepare('SELECT id, name FROM collections WHERE root_path = ?')
+    .get(root) as unknown as { id: string; name: string } | undefined;
+  return row ? { collection: row.id, name: row.name } : { collection: id, name };
 }
 
 /**
@@ -291,11 +297,69 @@ export function removeMemory(db: DatabaseSync, id: string): boolean {
 
 // ── Reads ────────────────────────────────────────────────────────────────────
 
-/** Turn free text into a lenient FTS5 OR-query (punctuation stripped). */
+// Common words carry no signal and only dilute BM25 — drop them from queries.
+const STOPWORDS = new Set([
+  'the',
+  'a',
+  'an',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'to',
+  'of',
+  'in',
+  'on',
+  'and',
+  'or',
+  'for',
+  'with',
+  'this',
+  'that',
+  'it',
+  'as',
+  'at',
+  'by',
+  'we',
+  'you',
+  'do',
+  'does',
+  'how',
+  'why',
+  'what',
+  'when',
+  'from',
+  'our',
+  'its',
+]);
+
+/** Split an identifier into parts: camelCase/PascalCase → words (snake/kebab already split). */
+function splitIdentifier(word: string): string[] {
+  return word
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .split(/\s+/);
+}
+
+/**
+ * Build a lenient FTS5 query from free text: split identifiers so `renderPrMarkdown`
+ * matches memories mentioning "render"/"markdown", drop stopwords, and prefix-match
+ * longer terms (`autolink*`) for stem-ish recall. Tokens are alnum-only, so no FTS5
+ * operator can be injected. OR keeps recall broad; BM25 does the ranking.
+ */
 function toFtsQuery(text: string): string | null {
-  const tokens = text.toLowerCase().match(/[a-z0-9]+/g);
-  if (!tokens || tokens.length === 0) return null;
-  return tokens.map((t) => `"${t}"`).join(' OR ');
+  const tokens = new Set<string>();
+  for (const word of text.match(/[A-Za-z0-9]+/g) ?? []) {
+    for (const part of splitIdentifier(word)) {
+      const t = part.toLowerCase();
+      if (t.length < 2 || STOPWORDS.has(t)) continue;
+      tokens.add(t);
+    }
+  }
+  if (tokens.size === 0) return null;
+  return [...tokens].map((t) => (t.length >= 3 ? `${t}*` : t)).join(' OR ');
 }
 
 export interface QueryOpts {
@@ -319,19 +383,39 @@ export function queryMemories(db: DatabaseSync, collectionId: string, opts: Quer
   const params: (string | number)[] = [collectionId];
   if (opts.type) (filters.push('m.type = ?'), params.push(opts.type));
   if (opts.ticket) (filters.push('m.ticket = ?'), params.push(opts.ticket));
-  if (opts.file) (filters.push('m.files_json LIKE ?'), params.push(`%${opts.file}%`));
+  // Match the path against actual array ELEMENTS (json_each), not the raw JSON text,
+  // so brackets/quotes/other paths can't cause a false hit — but still a substring so
+  // a basename or partial path matches.
+  if (opts.file) {
+    filters.push('EXISTS (SELECT 1 FROM json_each(m.files_json) WHERE value LIKE ?)');
+    params.push(`%${opts.file}%`);
+  }
   if (opts.since) (filters.push('m.created_at >= ?'), params.push(opts.since));
 
   const fts = opts.text ? toFtsQuery(opts.text) : null;
   if (fts) {
-    const sql = `SELECT m.*, bm25(memories_fts) AS score
+    // Weight the title column above content (memory_id is UNINDEXED → weight 0). Pull a
+    // pool of the strongest BM25 matches, then re-rank in JS with a gentle recency
+    // penalty so a newer, equally-relevant memory wins — text relevance still dominates.
+    const pool = Math.max(limit * 3, 30);
+    const sql = `SELECT m.*, bm25(memories_fts, 0.0, 1.0, 2.0) AS score
       FROM memories_fts f JOIN memories m ON m.id = f.memory_id
       WHERE memories_fts MATCH ? AND ${filters.join(' AND ')}
       ORDER BY score ASC LIMIT ?`;
-    const rows = db.prepare(sql).all(fts, ...params, limit) as unknown as MemRow[];
-    return rows.map((r) => ({ ...rowToRecord(r), score: r.score }));
+    const rows = db.prepare(sql).all(fts, ...params, pool) as unknown as MemRow[];
+    const now = Date.now();
+    return rows
+      .map((r) => {
+        const ageDays = Math.max(0, (now - Date.parse(r.created_at)) / 86_400_000);
+        return { r, blended: (r.score ?? 0) + 0.03 * ageDays };
+      })
+      .sort((a, b) => a.blended - b.blended)
+      .slice(0, limit)
+      .map(({ r }) => ({ ...rowToRecord(r), score: r.score }));
   }
-  const sql = `SELECT m.* FROM memories m WHERE ${filters.join(' AND ')} ORDER BY m.created_at DESC LIMIT ?`;
+  // rowid (insertion order) breaks created_at ties so "newest-first" is deterministic
+  // even for inserts that land in the same millisecond.
+  const sql = `SELECT m.* FROM memories m WHERE ${filters.join(' AND ')} ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?`;
   return (db.prepare(sql).all(...params, limit) as unknown as MemRow[]).map(rowToRecord);
 }
 
