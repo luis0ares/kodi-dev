@@ -10,6 +10,7 @@ import {
   queryMemories,
   removeMemory,
   resolveCollection,
+  type Collection,
   type QueryHit,
 } from '../memory/store.js';
 import {
@@ -50,6 +51,21 @@ function renderList(hits: QueryHit[]): string {
   return hits.length ? hits.map(renderLine).join('\n') : 'no memories';
 }
 
+/** Open the memory DB, run `fn`, and always close it. */
+function withDb<T>(fn: (db: ReturnType<typeof openDb>) => T): T {
+  const db = openDb();
+  try {
+    return fn(db);
+  } finally {
+    db.close();
+  }
+}
+
+/** Like {@link withDb}, but also resolves this project's collection first. */
+function withCollection<T>(fn: (db: ReturnType<typeof openDb>, col: Collection) => T): T {
+  return withDb((db) => fn(db, resolveCollection(db)));
+}
+
 export function registerMemoryCommand(program: Command) {
   const memory = program
     .command('memory')
@@ -75,18 +91,14 @@ export function registerMemoryCommand(program: Command) {
             files: o.file ?? [],
             title: o.title,
           });
-      const db = openDb();
-      try {
-        const col = resolveCollection(db);
+      withCollection((db, col) => {
         const { record, deduped } = insertMemory(db, col.collection, draft);
         out({ ...record, deduped }, o.json, () =>
           deduped
             ? `Already stored (dedup): ${record.id} — ${record.title}`
             : `Stored ${record.id} [${record.type}] — ${record.title}`,
         );
-      } finally {
-        db.close();
-      }
+      });
     });
 
   memory
@@ -99,9 +111,7 @@ export function registerMemoryCommand(program: Command) {
     .option('-n, --limit <n>', 'max results (default 10)', (v) => Number(v))
     .option('--json', 'machine-readable output', false)
     .action((text: string[], o) => {
-      const db = openDb();
-      try {
-        const col = resolveCollection(db);
+      withCollection((db, col) => {
         const hits = queryMemories(db, col.collection, {
           text: text?.length ? text.join(' ') : undefined,
           type: asType(o.type),
@@ -111,9 +121,7 @@ export function registerMemoryCommand(program: Command) {
           limit: o.limit,
         });
         out(hits, o.json, () => renderList(hits));
-      } finally {
-        db.close();
-      }
+      });
     });
 
   memory
@@ -124,18 +132,14 @@ export function registerMemoryCommand(program: Command) {
     .option('-n, --limit <n>', 'max results (default 10)', (v) => Number(v))
     .option('--json', 'machine-readable output', false)
     .action((o) => {
-      const db = openDb();
-      try {
-        const col = resolveCollection(db);
+      withCollection((db, col) => {
         const hits = queryMemories(db, col.collection, {
           type: asType(o.type),
           ticket: o.ticket,
           limit: o.limit,
         });
         out(hits, o.json, () => renderList(hits));
-      } finally {
-        db.close();
-      }
+      });
     });
 
   memory
@@ -148,8 +152,7 @@ export function registerMemoryCommand(program: Command) {
     .option('--title <text>')
     .option('--json', 'machine-readable output', false)
     .action((id: string, o) => {
-      const db = openDb();
-      try {
+      withDb((db) => {
         const updated = amendMemory(db, id, {
           content: o.content,
           type: asType(o.type),
@@ -163,9 +166,7 @@ export function registerMemoryCommand(program: Command) {
           return;
         }
         out(updated, o.json, () => `Amended ${updated.id} — ${updated.title}`);
-      } finally {
-        db.close();
-      }
+      });
     });
 
   memory
@@ -173,14 +174,11 @@ export function registerMemoryCommand(program: Command) {
     .description('Delete a memory')
     .option('--json', 'machine-readable output', false)
     .action((id: string, o) => {
-      const db = openDb();
-      try {
+      withDb((db) => {
         const removed = removeMemory(db, id);
         out({ removed, id }, o.json, () => (removed ? `Removed ${id}` : `no memory ${id}`));
         if (!removed) process.exitCode = 1;
-      } finally {
-        db.close();
-      }
+      });
     });
 
   memory
@@ -189,9 +187,7 @@ export function registerMemoryCommand(program: Command) {
     .option('-t, --type <type>', 'export only this type')
     .option('-f, --file <path>', 'write to a file (default: stdout)')
     .action((o) => {
-      const db = openDb();
-      try {
-        const col = resolveCollection(db);
+      withCollection((db, col) => {
         const records = exportMemories(db, col.collection, asType(o.type));
         const doc = {
           collection: col.name,
@@ -212,9 +208,7 @@ export function registerMemoryCommand(program: Command) {
         } else {
           process.stdout.write(yaml);
         }
-      } finally {
-        db.close();
-      }
+      });
     });
 
   memory
@@ -224,14 +218,10 @@ export function registerMemoryCommand(program: Command) {
     .option('--json', 'machine-readable output', false)
     .action((path: string, o) => {
       const doc = MemoryExportDocSchema.parse(parseYaml(readFileSync(path, 'utf-8')));
-      const db = openDb();
-      try {
-        const col = resolveCollection(db);
+      withCollection((db, col) => {
         const res = importMemories(db, col.collection, doc.memories, asType(o.type));
         out(res, o.json, () => `Imported: +${res.added} added, ${res.skipped} skipped`);
-      } finally {
-        db.close();
-      }
+      });
     });
 
   return memory;
