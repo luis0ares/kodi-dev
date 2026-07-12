@@ -43,6 +43,19 @@ function tx<T>(db: DatabaseSync, fn: () => T): T {
   }
 }
 
+// node:sqlite returns rows as generic `Record<string, SQLOutputValue>`; our columns
+// are known, so these two helpers centralize the single unavoidable cast (rather than
+// repeating `as unknown as T` at every call site) behind a typed read.
+type Bind = string | number;
+
+function queryOne<T>(db: DatabaseSync, sql: string, ...params: Bind[]): T | undefined {
+  return db.prepare(sql).get(...params) as unknown as T | undefined;
+}
+
+function queryAll<T>(db: DatabaseSync, sql: string, ...params: Bind[]): T[] {
+  return db.prepare(sql).all(...params) as unknown as T[];
+}
+
 // ── Collection identity ──────────────────────────────────────────────────────
 
 function slug(s: string): string {
@@ -92,9 +105,11 @@ export function provisionCollection(
   const name = slug(preferredName ?? basename(root));
   const id = `${name}-${shortHash(root)}`;
   ensureCollectionRow(db, id, name, root);
-  const row = db
-    .prepare('SELECT id, name FROM collections WHERE root_path = ?')
-    .get(root) as unknown as { id: string; name: string } | undefined;
+  const row = queryOne<{ id: string; name: string }>(
+    db,
+    'SELECT id, name FROM collections WHERE root_path = ?',
+    root,
+  );
   return row ? { collection: row.id, name: row.name } : { collection: id, name };
 }
 
@@ -127,9 +142,11 @@ export function lookupCollection(db: DatabaseSync, cwd: string = process.cwd()):
   if (cfg.memory?.collection) {
     return { collection: cfg.memory.collection, name: cfg.memory.name ?? cfg.memory.collection };
   }
-  const row = db
-    .prepare('SELECT id, name FROM collections WHERE root_path = ?')
-    .get(findProjectRoot(cwd)) as unknown as { id: string; name: string } | undefined;
+  const row = queryOne<{ id: string; name: string }>(
+    db,
+    'SELECT id, name FROM collections WHERE root_path = ?',
+    findProjectRoot(cwd),
+  );
   return row ? { collection: row.id, name: row.name } : null;
 }
 
@@ -225,9 +242,12 @@ export function insertMemory(
   draft: MemoryDraft,
 ): InsertResult {
   const hash = contentHash(draft.content);
-  const existing = db
-    .prepare('SELECT * FROM memories WHERE collection_id = ? AND content_hash = ?')
-    .get(collectionId, hash) as unknown as MemRow | undefined;
+  const existing = queryOne<MemRow>(
+    db,
+    'SELECT * FROM memories WHERE collection_id = ? AND content_hash = ?',
+    collectionId,
+    hash,
+  );
   if (existing) return { record: rowToRecord(existing), deduped: true };
   const record = rawInsert(db, collectionId, {
     content: draft.content,
@@ -251,8 +271,7 @@ export interface AmendPatch {
 
 /** Edit a memory in place; returns null when the id is unknown. */
 export function amendMemory(db: DatabaseSync, id: string, patch: AmendPatch): MemoryRecord | null {
-  const cur = db.prepare('SELECT * FROM memories WHERE id = ?').get(id) as unknown as
-    MemRow | undefined;
+  const cur = queryOne<MemRow>(db, 'SELECT * FROM memories WHERE id = ?', id);
   if (!cur) return null;
   const prev = rowToRecord(cur);
   const content = patch.content ?? prev.content;
@@ -264,9 +283,13 @@ export function amendMemory(db: DatabaseSync, id: string, patch: AmendPatch): Me
   // Guard the collection's dedup invariant up front with a clear message, rather
   // than letting the UNIQUE(collection_id, content_hash) constraint throw raw.
   if (hash !== prev.contentHash) {
-    const clash = db
-      .prepare('SELECT id FROM memories WHERE collection_id = ? AND content_hash = ? AND id <> ?')
-      .get(prev.collection, hash, id) as unknown as { id: string } | undefined;
+    const clash = queryOne<{ id: string }>(
+      db,
+      'SELECT id FROM memories WHERE collection_id = ? AND content_hash = ? AND id <> ?',
+      prev.collection,
+      hash,
+      id,
+    );
     if (clash) {
       throw new Error(
         `another memory (${clash.id}) already has identical content in this project.`,
@@ -407,7 +430,7 @@ export function queryMemories(db: DatabaseSync, collectionId: string, opts: Quer
       FROM memories_fts f JOIN memories m ON m.id = f.memory_id
       WHERE memories_fts MATCH ? AND ${filters.join(' AND ')}
       ORDER BY score ASC LIMIT ?`;
-    const rows = db.prepare(sql).all(fts, ...params, pool) as unknown as MemRow[];
+    const rows = queryAll<MemRow>(db, sql, fts, ...params, pool);
     const now = Date.now();
     return rows
       .map((r) => {
@@ -421,7 +444,7 @@ export function queryMemories(db: DatabaseSync, collectionId: string, opts: Quer
   // rowid (insertion order) breaks created_at ties so "newest-first" is deterministic
   // even for inserts that land in the same millisecond.
   const sql = `SELECT m.* FROM memories m WHERE ${filters.join(' AND ')} ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?`;
-  return (db.prepare(sql).all(...params, limit) as unknown as MemRow[]).map(rowToRecord);
+  return queryAll<MemRow>(db, sql, ...params, limit).map(rowToRecord);
 }
 
 /** The N most recent memories in a collection (for the session-start digest). */
@@ -437,12 +460,18 @@ export function exportMemories(
   collectionId: string,
   type?: MemoryType,
 ): MemoryRecord[] {
-  const sql = type
-    ? 'SELECT * FROM memories WHERE collection_id = ? AND type = ? ORDER BY created_at ASC'
-    : 'SELECT * FROM memories WHERE collection_id = ? ORDER BY created_at ASC';
-  const rows = (type
-    ? db.prepare(sql).all(collectionId, type)
-    : db.prepare(sql).all(collectionId)) as unknown as MemRow[];
+  const rows = type
+    ? queryAll<MemRow>(
+        db,
+        'SELECT * FROM memories WHERE collection_id = ? AND type = ? ORDER BY created_at ASC',
+        collectionId,
+        type,
+      )
+    : queryAll<MemRow>(
+        db,
+        'SELECT * FROM memories WHERE collection_id = ? ORDER BY created_at ASC',
+        collectionId,
+      );
   return rows.map(rowToRecord);
 }
 
