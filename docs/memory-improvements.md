@@ -6,6 +6,43 @@
 
 ---
 
+## 0. Status update (2026-07-12)
+
+**Shipped** (commit `fix(memory): parallel-session safety + better retrieval`):
+
+- **Concurrency (§4.7)** — the shared `~/.kodi/rag.db` is now safe across parallel
+  sessions: `busy_timeout` is armed *before* the WAL switch and schema DDL (a real
+  bug — it was last, dropping ~3/25 parallel writes; now 25/25 and 40/40 land),
+  writes use `BEGIN IMMEDIATE` (no read→write upgrade deadlock), collection
+  provisioning is race-safe (`INSERT … ON CONFLICT DO NOTHING` + read-back), and
+  `synchronous=NORMAL`.
+- **Retrieval quality (§4.1, §4.4)** — smarter FTS query building (identifier
+  splitting, stopwords, prefix terms), title-weighted `bm25()` + a gentle recency
+  blend, deterministic newest-first via `rowid` tie-break, and `--file` matching real
+  array elements via `json_each`.
+
+**Direction (per product owner):** the full ambient claude-mem-style *rewrite* is
+**dropped**. What is preserved is a **design-consistent expansion of Claude hooks** —
+keep everything that fits kodi's locked design (lexical, zero-dep, offline, CLI-only,
+**no ambient LLM capture**), and nothing that deviates from it. Concretely, the only
+hook additions that qualify:
+
+- **SessionStart digest** — *already shipped* (`kodi hook session-start`); becomes the
+  layered digest in §4.3 as retrieval quality improves.
+- **UserPromptSubmit injection** — a new `kodi hook user-prompt-submit` that runs a
+  plain `kodi memory query` on the user's prompt and injects a small, token-budgeted,
+  deduped set of relevant memories. Pure FTS, no LLM. **This is the recommended next
+  hook.**
+- **Deterministic capture on structured events** — a `PostToolUse` hook that stores a
+  memory when kodi itself emits a durable artifact (ticket hand-off, security report,
+  ADR). No transcript summarization, no `claude -p`.
+
+Explicitly **excluded** as design deviations: `claude -p`/Agent-SDK transcript
+summarization, a background worker/daemon, and Stop-hook "capture gates" that block
+the session — these are the parts of the ambient replan that break the ethos.
+
+---
+
 ## 1. Executive summary
 
 `kodi memory` is a machine-global, cross-session knowledge store for AI coding agents. Claude (or any agent that can run Bash) persists findings about a repo — decisions, gotchas, conventions, architecture notes — into a single SQLite database at `~/.kodi/rag.db`, partitioned into one collection per project, and retrieves them later via lexical full-text search (FTS5/BM25) plus metadata filters (`--type`, `--ticket`, `--file`, `--since`). A SessionStart hook injects a small digest of recent memories into every new session, and a `/remember` skill plus an installed rule teach the agent to store and query.
