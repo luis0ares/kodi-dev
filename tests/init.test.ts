@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   configureBoard,
   installHarness,
+  mergePermissions,
   mergeSessionStartHook,
+  PERMISSION_ALLOW,
+  PERMISSION_DENY,
   writeState,
 } from '../src/commands/init.js';
 import type { Prompter } from '../src/prompt.js';
@@ -101,6 +104,74 @@ describe('SessionStart hook merge', () => {
   });
 });
 
+describe('permissions merge', () => {
+  it('adds the deny/allow defaults, is idempotent, and preserves existing rules', () => {
+    const settings: Record<string, any> = { permissions: { deny: ['Bash(rm:*)'], allow: [] } };
+    expect(mergePermissions(settings)).toBe(true);
+    expect(mergePermissions(settings)).toBe(false); // idempotent
+
+    // pre-existing rule kept, plus every default deny/allow present exactly once
+    expect(settings.permissions.deny).toContain('Bash(rm:*)');
+    for (const rule of PERMISSION_DENY) {
+      expect(settings.permissions.deny.filter((r: string) => r === rule)).toHaveLength(1);
+    }
+    for (const rule of PERMISSION_ALLOW) {
+      expect(settings.permissions.allow.filter((r: string) => r === rule)).toHaveLength(1);
+    }
+  });
+
+  it('denies gh/az PR + board commands and only `kodi init`, allows reading agents/skills', () => {
+    expect(PERMISSION_DENY).toEqual(
+      expect.arrayContaining([
+        'Bash(gh pr:*)',
+        'Bash(az repos pr:*)',
+        'Bash(az boards:*)',
+        'Bash(kodi init:*)',
+      ]),
+    );
+    // kodi is the sanctioned proxy — only `kodi init` is denied, never all of kodi
+    expect(PERMISSION_DENY).not.toContain('Bash(kodi:*)');
+    expect(PERMISSION_DENY).not.toContain('Bash(rtk kodi:*)');
+    expect(PERMISSION_ALLOW).toEqual(
+      expect.arrayContaining(['Read(.claude/agents/**)', 'Read(.claude/skills/**)']),
+    );
+  });
+
+  it('allows all kodi commands (direct + rtk) while init stays denied — deny wins', () => {
+    expect(PERMISSION_ALLOW).toEqual(
+      expect.arrayContaining(['Bash(kodi:*)', 'Bash(rtk kodi:*)']),
+    );
+    // the broad allow and the narrow init-deny coexist; deny precedence blocks init
+    expect(PERMISSION_DENY).toEqual(
+      expect.arrayContaining(['Bash(kodi init:*)', 'Bash(rtk kodi init:*)']),
+    );
+  });
+
+  it('denies the rtk-proxied form of every board/PR + kodi-init command too', () => {
+    // rtk rewrites `gh …` → `rtk gh …`, so each direct deny must have an rtk twin
+    for (const direct of PERMISSION_DENY) {
+      if (direct.startsWith('Bash(rtk ')) continue;
+      const rtkForm = direct.replace('Bash(', 'Bash(rtk ');
+      expect(PERMISSION_DENY).toContain(rtkForm);
+    }
+    expect(PERMISSION_DENY).toEqual(
+      expect.arrayContaining([
+        'Bash(rtk gh pr:*)',
+        'Bash(rtk az repos pr:*)',
+        'Bash(rtk az boards:*)',
+        'Bash(rtk kodi init:*)',
+      ]),
+    );
+  });
+
+  it('seeds permissions from an empty settings object', () => {
+    const settings: Record<string, any> = {};
+    expect(mergePermissions(settings)).toBe(true);
+    expect(settings.permissions.deny).toEqual(PERMISSION_DENY);
+    expect(settings.permissions.allow).toEqual(PERMISSION_ALLOW);
+  });
+});
+
 describe('installHarness (files only)', () => {
   let dir: string;
   beforeEach(() => {
@@ -111,6 +182,10 @@ describe('installHarness (files only)', () => {
   it('installs the hook, agents, skills and docs scaffold (no board file)', () => {
     installHarness(dir, { assetsDir: REPO_ASSETS });
     expect(existsSync(join(dir, '.claude/settings.json'))).toBe(true);
+    // the settings file carries the pre-configured permission rules
+    const settings = JSON.parse(readFileSync(join(dir, '.claude/settings.json'), 'utf-8'));
+    expect(settings.permissions.deny).toEqual(expect.arrayContaining(PERMISSION_DENY));
+    expect(settings.permissions.allow).toEqual(expect.arrayContaining(PERMISSION_ALLOW));
     for (const a of ['brief', 'architect', 'build-orchestrator']) {
       expect(existsSync(join(dir, '.claude/agents', `${a}.md`))).toBe(true);
     }

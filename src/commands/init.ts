@@ -51,6 +51,71 @@ export function mergeSessionStartHook(settings: Record<string, any>): boolean {
   return true;
 }
 
+/**
+ * The gh/az commands that touch pull requests and board tasks. Each is denied
+ * BOTH directly and via the rtk proxy (which rewrites `gh …` → `rtk gh …`), so the
+ * proxy can't be used to slip a board/PR mutation past the direct deny.
+ */
+const BOARD_CLI_COMMANDS = [
+  'gh pr', // GitHub pull requests
+  'gh issue', // GitHub issues (board tasks)
+  'gh project', // GitHub Projects (boards)
+  'az repos pr', // Azure DevOps pull requests
+  'az boards', // Azure DevOps boards (work items / tasks)
+];
+
+/** Deny a command both directly and through the rtk proxy. */
+function denyDirectAndRtk(cmd: string): string[] {
+  return [`Bash(${cmd}:*)`, `Bash(rtk ${cmd}:*)`];
+}
+
+/**
+ * Locked-down default permissions written into a new project's settings.json.
+ * kodi IS the sanctioned path for the agent: it proxies gh/az with a validated
+ * template, so the agent drives the board THROUGH kodi while the raw gh/az board
+ * and PR commands are denied (forcing everything through the validating layer).
+ * The one kodi command denied is `kodi init` — a one-time human setup step that
+ * would clobber this very config if an agent re-ran it. The rtk-proxied form of
+ * each rule is denied too, since rtk rewrites bare commands. Reads of the installed
+ * agents/skills are allowed. Rules are Bash/Read prefix patterns.
+ */
+export const PERMISSION_DENY = [
+  ...BOARD_CLI_COMMANDS.flatMap(denyDirectAndRtk),
+  ...denyDirectAndRtk('kodi init'), // the one-time human setup command, direct and via rtk
+];
+export const PERMISSION_ALLOW = [
+  'Read(.claude/agents/**)', // read the installed agents
+  'Read(.claude/skills/**)', // read the installed skills
+  // kodi is the sanctioned board proxy — allow all of it. `kodi init` stays in the
+  // deny list, and deny rules override allow, so every kodi command runs without a
+  // prompt EXCEPT init. The rtk-proxied form is allowed for the same reason.
+  'Bash(kodi:*)',
+  'Bash(rtk kodi:*)',
+];
+
+/**
+ * Idempotently merge the default permission rules into a settings object. Existing
+ * user rules are preserved; only missing rules are appended, so re-running init
+ * never duplicates or clobbers a hand-edited allow/deny list.
+ */
+export function mergePermissions(settings: Record<string, any>): boolean {
+  const perms = (settings.permissions ??= {});
+  const deny: string[] = (perms.deny ??= []);
+  const allow: string[] = (perms.allow ??= []);
+  let changed = false;
+  for (const rule of PERMISSION_DENY)
+    if (!deny.includes(rule)) {
+      deny.push(rule);
+      changed = true;
+    }
+  for (const rule of PERMISSION_ALLOW)
+    if (!allow.includes(rule)) {
+      allow.push(rule);
+      changed = true;
+    }
+  return changed;
+}
+
 /** The packaged assets directory (agents + skills), resolved next to the bundle. */
 export function defaultAssetsDir(): string {
   return fileURLToPath(new URL('../assets/', import.meta.url));
@@ -129,9 +194,14 @@ export function installHarness(root: string, opts: InstallOptions = {}): string[
   const settings: Record<string, any> = existsSync(settingsPath)
     ? JSON.parse(readFileSync(settingsPath, 'utf-8'))
     : {};
-  if (mergeSessionStartHook(settings)) {
+  const hookChanged = mergeSessionStartHook(settings);
+  const permsChanged = mergePermissions(settings);
+  if (hookChanged || permsChanged) {
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
-    changed.push('.claude/settings.json (SessionStart hook)');
+    const parts = [hookChanged ? 'SessionStart hook' : null, permsChanged ? 'permissions' : null]
+      .filter(Boolean)
+      .join(' + ');
+    changed.push(`.claude/settings.json (${parts})`);
   }
 
   changed.push(
