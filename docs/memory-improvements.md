@@ -33,9 +33,10 @@ hook additions that qualify:
   plain `kodi memory query` on the prompt and injects the top relevant memories within
   a ~300-token budget; silent on a trivial prompt or no hit. Pure FTS, no LLM. Wired by
   `kodi init` alongside the SessionStart digest.
-- **Deterministic capture on structured events** — a `PostToolUse` hook that stores a
-  memory when kodi itself emits a durable artifact (ticket hand-off, security report,
-  ADR). No transcript summarization, no `claude -p`.
+- **Deterministic capture on structured events** — *shipped (v1)* (`kodi hook
+  post-tool-use`, Bash matcher): captures the security findings on a `kodi pr create
+  --vulnerability …` as `gotcha` memories (dedup/idempotent, no LLM). Extensible to
+  more kodi artifacts (ticket hand-offs, ADRs) next.
 
 Explicitly **excluded** as design deviations: `claude -p`/Agent-SDK transcript
 summarization, a background worker/daemon, and Stop-hook "capture gates" that block
