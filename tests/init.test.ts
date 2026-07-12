@@ -8,6 +8,7 @@ import {
   installHarness,
   mergePermissions,
   mergeSessionStartHook,
+  mergeUserPromptSubmitHook,
   PERMISSION_ALLOW,
   PERMISSION_DENY,
   writeState,
@@ -106,6 +107,19 @@ describe('SessionStart hook merge', () => {
   });
 });
 
+describe('UserPromptSubmit hook merge', () => {
+  it('adds the memory-injection hook, is idempotent, and has no matcher', () => {
+    const settings: Record<string, any> = {};
+    expect(mergeUserPromptSubmitHook(settings)).toBe(true);
+    expect(mergeUserPromptSubmitHook(settings)).toBe(false);
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(settings.hooks.UserPromptSubmit[0].matcher).toBeUndefined();
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe(
+      'kodi hook user-prompt-submit',
+    );
+  });
+});
+
 describe('permissions merge', () => {
   it('adds the deny/allow defaults, is idempotent, and preserves existing rules', () => {
     const settings: Record<string, any> = { permissions: { deny: ['Bash(rm:*)'], allow: [] } };
@@ -186,6 +200,11 @@ describe('installHarness (files only)', () => {
     const settings = JSON.parse(readFileSync(join(dir, '.claude/settings.json'), 'utf-8'));
     expect(settings.permissions.deny).toEqual(expect.arrayContaining(PERMISSION_DENY));
     expect(settings.permissions.allow).toEqual(expect.arrayContaining(PERMISSION_ALLOW));
+    // both memory hooks are wired
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toBe('kodi hook session-start');
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe(
+      'kodi hook user-prompt-submit',
+    );
     for (const a of ['brief', 'architect', 'build-orchestrator']) {
       expect(existsSync(join(dir, '.claude/agents', `${a}.md`))).toBe(true);
     }

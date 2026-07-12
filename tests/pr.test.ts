@@ -40,7 +40,9 @@ describe('pr template', () => {
   it('renders the security vulnerabilities section only when findings exist', () => {
     expect(renderPrMarkdown(draft())).not.toContain('## Security vulnerabilities');
     const md = renderPrMarkdown(
-      draft({ vulnerabilities: ['CRITICAL — SQLi in login (docs/security/KODI-014-sqli-login.md)'] }),
+      draft({
+        vulnerabilities: ['CRITICAL — SQLi in login (docs/security/KODI-014-sqli-login.md)'],
+      }),
     );
     expect(md).toContain('## Security vulnerabilities');
     expect(md).toContain('- CRITICAL — SQLi in login (docs/security/KODI-014-sqli-login.md)');

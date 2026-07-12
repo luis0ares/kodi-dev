@@ -37,6 +37,7 @@ import { readlinePrompter, type Prompter } from '../prompt.js';
 
 const HOOK_COMMAND = 'kodi hook session-start';
 const SESSION_MATCHER = 'startup|resume|clear|compact';
+const UPS_COMMAND = 'kodi hook user-prompt-submit';
 
 interface HookEntry {
   matcher?: string;
@@ -50,6 +51,19 @@ export function mergeSessionStartHook(settings: Record<string, any>): boolean {
   const already = arr.some((e) => e.hooks?.some((h) => h.command === HOOK_COMMAND));
   if (already) return false;
   arr.push({ matcher: SESSION_MATCHER, hooks: [{ type: 'command', command: HOOK_COMMAND }] });
+  return true;
+}
+
+/**
+ * Idempotently merge the kodi UserPromptSubmit hook, which injects memories relevant
+ * to each prompt (pure FTS, no LLM). No matcher — UserPromptSubmit is not a tool event.
+ */
+export function mergeUserPromptSubmitHook(settings: Record<string, any>): boolean {
+  settings.hooks ??= {};
+  const arr: HookEntry[] = (settings.hooks.UserPromptSubmit ??= []);
+  const already = arr.some((e) => e.hooks?.some((h) => h.command === UPS_COMMAND));
+  if (already) return false;
+  arr.push({ hooks: [{ type: 'command', command: UPS_COMMAND }] });
   return true;
 }
 
@@ -197,10 +211,15 @@ export function installHarness(root: string, opts: InstallOptions = {}): string[
     ? JSON.parse(readFileSync(settingsPath, 'utf-8'))
     : {};
   const hookChanged = mergeSessionStartHook(settings);
+  const upsChanged = mergeUserPromptSubmitHook(settings);
   const permsChanged = mergePermissions(settings);
-  if (hookChanged || permsChanged) {
+  if (hookChanged || upsChanged || permsChanged) {
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
-    const parts = [hookChanged ? 'SessionStart hook' : null, permsChanged ? 'permissions' : null]
+    const parts = [
+      hookChanged ? 'SessionStart hook' : null,
+      upsChanged ? 'UserPromptSubmit hook' : null,
+      permsChanged ? 'permissions' : null,
+    ]
       .filter(Boolean)
       .join(' + ');
     changed.push(`.claude/settings.json (${parts})`);
