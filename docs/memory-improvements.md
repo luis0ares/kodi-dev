@@ -33,10 +33,15 @@ hook additions that qualify:
   plain `kodi memory query` on the prompt and injects the top relevant memories within
   a ~300-token budget; silent on a trivial prompt or no hit. Pure FTS, no LLM. Wired by
   `kodi init` alongside the SessionStart digest.
-- **Deterministic capture on structured events** — *shipped (v1)* (`kodi hook
-  post-tool-use`, Bash matcher): captures the security findings on a `kodi pr create
-  --vulnerability …` as `gotcha` memories (dedup/idempotent, no LLM). Extensible to
-  more kodi artifacts (ticket hand-offs, ADRs) next.
+- **Deterministic capture on structured events** — *shipped* (`kodi hook
+  post-tool-use`, **Bash matcher only**): captures the security findings on a `kodi pr
+  create --vulnerability …` as `gotcha` memories, and a `kodi tickets hand-off <key>`
+  as a `task-note` slice-completion milestone (guarded by a `[dry-run]` check so a
+  preview isn't recorded as done). Dedup/idempotent, no LLM.
+  - **Decided: no `Write`-matcher ADR auto-capture.** Catching ADRs would require the
+    hook to also match the `Write` tool, firing on *every* file write — the per-write
+    overhead isn't worth it. Decisions (including ADRs) are captured via the
+    `/remember` rule instead, keeping capture strictly kodi/Bash-scoped and zero-overhead.
 
 Explicitly **excluded** as design deviations: `claude -p`/Agent-SDK transcript
 summarization, a background worker/daemon, and Stop-hook "capture gates" that block
