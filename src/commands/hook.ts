@@ -31,32 +31,46 @@ function readHookInput(): Promise<Record<string, unknown>> {
 }
 
 /**
- * A compact digest of this project's recent memories, appended to the SessionStart
- * context so past findings re-enter each session. Strictly read-only and best-effort:
- * if there is no DB, no collection, or no memories, it contributes nothing (and never
- * throws — a hook must not break session startup).
+ * Open the memory DB read-only for a hook, run `fn`, and always close. Returns
+ * `fallback` when there is no DB yet or anything throws — a hook must never break the
+ * session, so reads are strictly best-effort.
  */
-function memoryDigest(): string {
+function withReadDb<T>(fallback: T, fn: (db: ReturnType<typeof openDb>) => T): T {
   try {
-    if (!existsSync(ragDbPath())) return '';
+    if (!existsSync(ragDbPath())) return fallback;
     const db = openDb();
     try {
-      const col = lookupCollection(db);
-      if (!col) return '';
-      const recent = recentMemories(db, col.collection, 5);
-      if (recent.length === 0) return '';
-      const lines = recent.map((m) => `- [${m.type}] ${m.ticket ? m.ticket + ' ' : ''}${m.title}`);
-      return (
-        `\n\n## Project memory (kodi)\n\n` +
-        `Recent findings for this project — query more with \`kodi memory query <text>\` ` +
-        `and store new ones with \`kodi memory store\`:\n\n${lines.join('\n')}\n`
-      );
+      return fn(db);
     } finally {
       db.close();
     }
   } catch {
-    return '';
+    return fallback;
   }
+}
+
+/** Render a memory as a one-line `- [type] TICKET title` bullet. */
+function bullet(m: { type: string; ticket: string | null; title: string }): string {
+  return `- [${m.type}] ${m.ticket ? m.ticket + ' ' : ''}${m.title}`;
+}
+
+/**
+ * A compact digest of this project's recent memories, appended to the SessionStart
+ * context so past findings re-enter each session. Strictly read-only and best-effort:
+ * if there is no DB, no collection, or no memories, it contributes nothing.
+ */
+function memoryDigest(): string {
+  return withReadDb('', (db) => {
+    const col = lookupCollection(db);
+    if (!col) return '';
+    const recent = recentMemories(db, col.collection, 5);
+    if (recent.length === 0) return '';
+    return (
+      `\n\n## Project memory (kodi)\n\n` +
+      `Recent findings for this project — query more with \`kodi memory query <text>\` ` +
+      `and store new ones with \`kodi memory store\`:\n\n${recent.map(bullet).join('\n')}\n`
+    );
+  });
 }
 
 /**
@@ -65,37 +79,28 @@ function memoryDigest(): string {
  * '' (inject nothing) when there is no DB, no collection, a trivial prompt, or no hit.
  */
 function promptInjection(prompt: string, cwd: string): string {
-  try {
-    if (!prompt.trim() || !existsSync(ragDbPath())) return '';
-    const db = openDb();
-    try {
-      const col = lookupCollection(db, cwd);
-      if (!col) return '';
-      // Keep it tight: the top few relevant memories, capped by a small char budget
-      // (~300 tokens) so per-prompt injection never bloats context.
-      const hits = queryMemories(db, col.collection, { text: prompt, limit: 3 });
-      if (hits.length === 0) return '';
-      const BUDGET = 1200;
-      const lines: string[] = [];
-      let used = 0;
-      for (const m of hits) {
-        const line = `- [${m.type}] ${m.ticket ? m.ticket + ' ' : ''}${m.title}`;
-        if (used + line.length > BUDGET) break;
-        lines.push(line);
-        used += line.length + 1;
-      }
-      if (lines.length === 0) return '';
-      return (
-        `## Possibly relevant project memory (kodi)\n\n` +
-        `Retrieved for your request — expand with \`kodi memory query "<topic>" --json\`:\n\n` +
-        `${lines.join('\n')}\n`
-      );
-    } finally {
-      db.close();
+  if (!prompt.trim()) return '';
+  return withReadDb('', (db) => {
+    const col = lookupCollection(db, cwd);
+    if (!col) return '';
+    // Keep it tight: the top few relevant memories, capped by a small char budget
+    // (~300 tokens) so per-prompt injection never bloats context.
+    const hits = queryMemories(db, col.collection, { text: prompt, limit: 3 });
+    const lines: string[] = [];
+    let used = 0;
+    for (const m of hits) {
+      const line = bullet(m);
+      if (used + line.length > 1200) break;
+      lines.push(line);
+      used += line.length + 1;
     }
-  } catch {
-    return '';
-  }
+    if (lines.length === 0) return '';
+    return (
+      `## Possibly relevant project memory (kodi)\n\n` +
+      `Retrieved for your request — expand with \`kodi memory query "<topic>" --json\`:\n\n` +
+      `${lines.join('\n')}\n`
+    );
+  });
 }
 
 /**
