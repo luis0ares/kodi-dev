@@ -15,7 +15,12 @@ export interface MemoryBinding {
   name: string;
 }
 
-/** The board column mapping (Azure states / GitHub Projects Status options), discovered/confirmed by `kodi init`. */
+/**
+ * The board column mapping — a display column name per logical status. For Azure
+ * these are the real BOARD COLUMNS the user sees (which may outnumber the
+ * work-item states, since multiple columns can share one state); for GitHub they
+ * are the Projects Status options. Discovered/confirmed by `kodi init`.
+ */
 export interface ColumnMap {
   /** Column a new issue lands in (e.g. "To Do"). */
   todo: string;
@@ -32,6 +37,17 @@ export interface BoardConfig {
   organization?: string;
   /** Azure project name. */
   project?: string;
+  /** Azure team that owns the board (needed to resolve board columns). */
+  team?: string;
+  /** Azure board name whose columns kodi drives (e.g. "Issues"). */
+  board?: string;
+  /**
+   * Azure only: chosen board-column name → the work-item state (`System.State`) it
+   * maps to. Runtime moves set BOTH the board column and this state so the card
+   * lands in the exact column even when several columns share a state. A column
+   * absent here maps to itself (boards where column name == state name).
+   */
+  columnStates?: Record<string, string>;
   /** Repository for PRs (Azure: bare name; GitHub: `owner/repo`, also where issues are created). */
   repository?: string;
   /** GitHub Projects v2 owner login (org or user) that owns the board. */

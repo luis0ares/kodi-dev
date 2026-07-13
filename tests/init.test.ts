@@ -17,7 +17,7 @@ import {
 import { openDb } from '../src/memory/db.js';
 import { provisionCollection } from '../src/memory/store.js';
 import type { Prompter } from '../src/prompt.js';
-import { normalizeOrgUrl, type IssueState, type Runner } from '../src/providers/azure-discovery.js';
+import { normalizeOrgUrl, type Runner } from '../src/providers/azure-discovery.js';
 
 const REPO_ASSETS = fileURLToPath(new URL('../assets/', import.meta.url));
 
@@ -40,18 +40,42 @@ function scripted(answers: { select?: string[]; input?: string[]; confirm?: bool
   };
 }
 
-const BASIC_STATES: IssueState[] = [
-  { name: 'To Do', category: 'Proposed' },
-  { name: 'Doing', category: 'InProgress' },
-  { name: 'Done', category: 'Completed' },
+interface AzCol {
+  name: string;
+  columnType: string;
+  stateMappings: { Issue: string };
+}
+
+/** The user's real EPR-V2 board: 5 columns over 3 states (In Progress + To Review share "Doing"). */
+const BOARD_COLUMNS: AzCol[] = [
+  { name: 'AI Generated', columnType: 'incoming', stateMappings: { Issue: 'To Do' } },
+  { name: 'To Do', columnType: 'inProgress', stateMappings: { Issue: 'To Do' } },
+  { name: 'In Progress', columnType: 'inProgress', stateMappings: { Issue: 'Doing' } },
+  { name: 'To Review', columnType: 'inProgress', stateMappings: { Issue: 'Doing' } },
+  { name: 'Done', columnType: 'outgoing', stateMappings: { Issue: 'Done' } },
 ];
 
-/** Fake `az`: project list, project show (process), and Issue-type states (invoke). */
-function fakeAz(template = 'Basic', states: IssueState[] = BASIC_STATES): Runner {
+interface AzOpts {
+  template?: string;
+  teams?: string[];
+  boards?: string[];
+  columns?: AzCol[];
+}
+
+/** Fake `az`: project list/show, team list, and the boards + board-columns invokes. */
+function fakeAz(o: AzOpts = {}): Runner {
+  const template = o.template ?? 'Basic';
+  const teams = o.teams ?? ['EPR-V2 Team'];
+  const boards = o.boards ?? ['Issues', 'Epics'];
+  const columns = o.columns ?? BOARD_COLUMNS;
   return (args) => {
-    if (args.includes('invoke')) return JSON.stringify({ value: states });
-    if (args.includes('list'))
+    const has = (s: string) => args.includes(s);
+    if (has('team') && has('list')) return JSON.stringify({ value: teams.map((name) => ({ name })) });
+    if (has('project') && has('list'))
       return JSON.stringify({ value: [{ name: 'Alpha' }, { name: 'Beta' }] });
+    if (has('invoke') && has('columns')) return JSON.stringify({ value: columns });
+    if (has('invoke') && has('boards'))
+      return JSON.stringify({ value: boards.map((name) => ({ name })) });
     return JSON.stringify({ capabilities: { processTemplate: { templateName: template } } });
   };
 }
@@ -260,55 +284,68 @@ describe('configureBoard wizard', () => {
     expect(cfg).toEqual({ provider: 'local', prefix: 'MYPROJ' });
   });
 
-  it('configures azure: lists projects, selects one, auto-maps single-candidate columns', async () => {
-    // Basic has one state per category → all columns auto-selected, no column prompts.
+  it('configures azure by BOARD COLUMN — offers all 5 real columns, records column→state', async () => {
+    // The user's board shows 5 columns over 3 states; the wizard offers every real
+    // column (In Progress and To Review are DISTINCT here though both map to "Doing").
+    // Team auto-selects (only one) and the "Issues" board is the default.
     const cfg = await configureBoard(
-      scripted({ select: ['azure', 'Beta'], input: ['https://dev.azure.com/acme', 'MyRepo'] }),
+      scripted({
+        select: ['azure', 'Beta', 'To Do', 'In Progress', 'To Review', 'Done'],
+        input: ['https://dev.azure.com/acme', 'MyRepo'],
+      }),
       { runner: fakeAz() },
     );
     expect(cfg.provider).toBe('azure');
     expect(cfg.organization).toBe('https://dev.azure.com/acme');
     expect(cfg.project).toBe('Beta');
+    expect(cfg.team).toBe('EPR-V2 Team');
+    expect(cfg.board).toBe('Issues');
     expect(cfg.repository).toBe('MyRepo');
     expect(cfg.columns).toEqual({
       todo: 'To Do',
-      inProgress: 'Doing',
-      toReview: 'Doing',
+      inProgress: 'In Progress',
+      toReview: 'To Review',
       done: 'Done',
+    });
+    // Each chosen column carries the System.State it maps to — the whole point: two
+    // distinct columns ("In Progress", "To Review") both resolve to state "Doing".
+    expect(cfg.columnStates).toEqual({
+      'To Do': 'To Do',
+      'In Progress': 'Doing',
+      'To Review': 'Doing',
+      Done: 'Done',
     });
   });
 
-  it('lets the user SELECT the To Do column when several Proposed states exist', async () => {
-    const states: IssueState[] = [
-      { name: 'New', category: 'Proposed' },
-      { name: 'To Do', category: 'Proposed' },
-      { name: 'Doing', category: 'InProgress' },
-      { name: 'Done', category: 'Completed' },
-    ];
+  it('prompts for the team when a project has more than one', async () => {
     const cfg = await configureBoard(
       scripted({
-        select: ['azure', 'Beta', 'To Do'],
+        select: ['azure', 'Beta', 'Team B', 'To Do', 'In Progress', 'To Review', 'Done'],
         input: ['https://dev.azure.com/acme', 'MyRepo'],
       }),
-      { runner: fakeAz('Basic', states) },
+      { runner: fakeAz({ teams: ['Team A', 'Team B'] }) },
     );
-    expect(cfg.columns?.todo).toBe('To Do');
+    expect(cfg.team).toBe('Team B');
   });
 
-  it('configures azure non-interactively from flags', async () => {
+  it('configures azure non-interactively from flags (incl. team + board)', async () => {
     const cfg = await configureBoard(scripted({}), {
       provider: 'azure',
       org: 'https://dev.azure.com/acme',
       project: 'Beta',
+      team: 'EPR-V2 Team',
+      board: 'Issues',
       todoColumn: 'To Do',
-      inProgressColumn: 'Doing',
-      toReviewColumn: 'Review',
+      inProgressColumn: 'In Progress',
+      toReviewColumn: 'To Review',
       doneColumn: 'Done',
       repository: 'MyRepo',
       runner: fakeAz(),
     });
     expect(cfg.project).toBe('Beta');
-    expect(cfg.columns?.todo).toBe('To Do');
+    expect(cfg.team).toBe('EPR-V2 Team');
+    expect(cfg.columns?.toReview).toBe('To Review');
+    expect(cfg.columnStates?.['To Review']).toBe('Doing');
   });
 
   it('aborts when a flagged project is not in the org', async () => {
@@ -327,25 +364,10 @@ describe('configureBoard wizard', () => {
       configureBoard(
         scripted({ select: ['azure', 'Beta'], input: ['https://dev.azure.com/acme'] }),
         {
-          runner: fakeAz('Agile'),
+          runner: fakeAz({ template: 'Agile' }),
         },
       ),
     ).rejects.toThrow(/Issue/);
-  });
-
-  it('aborts when the board has no To Do-type (Proposed) state', async () => {
-    const states: IssueState[] = [
-      { name: 'Doing', category: 'InProgress' },
-      { name: 'Done', category: 'Completed' },
-    ];
-    await expect(
-      configureBoard(
-        scripted({ select: ['azure', 'Beta'], input: ['https://dev.azure.com/acme'] }),
-        {
-          runner: fakeAz('Basic', states),
-        },
-      ),
-    ).rejects.toThrow(/To Do-type/);
   });
 
   it('aborts azure when the organization URL is missing', async () => {

@@ -15,9 +15,13 @@ import type { ReadyResult, StartProvenance, TicketProvider, TicketRef } from './
  * Azure DevOps Boards ticket provider. Tickets are ALWAYS created as Issue
  * work-items; the canonical ticket record rides base64-encoded inside a <pre> in
  * the description (Azure strips HTML comments) so it round-trips losslessly.
- * Status maps to System.State via the column map discovered by `kodi init` (for
- * the Basic process, state names == board column names). All `az` calls are
- * proxied here; mutations respect dry-run.
+ *
+ * `kodi init` lets the user map each status to a real BOARD COLUMN, but a board
+ * column (`System.BoardColumn`) is a read-only computed field — Azure rejects
+ * writes to it. So kodi drives the board via the writable `System.State`,
+ * translating the chosen column to its mapped state (`columnStates`). When several
+ * columns share a state, Azure decides which one the card sits in. All `az` calls
+ * are proxied here; mutations respect dry-run.
  */
 
 // Azure sanitizes rich-text descriptions and STRIPS HTML comments, so the
@@ -44,6 +48,18 @@ export function columnForStatus(status: TicketStatus, cols: ColumnMap): string {
     default:
       return cols.todo;
   }
+}
+
+/**
+ * The `System.State` a board column maps to. Azure boards can have MORE columns
+ * than states (several columns sharing one state). `System.BoardColumn` is
+ * read-only (Azure rejects writes), so kodi drives the board via the writable
+ * `System.State`: it translates the user's chosen column to its state and sets
+ * that. A column with no recorded mapping falls back to itself — correct for a
+ * board where the column name IS the state name (e.g. a default Basic board).
+ */
+export function stateForColumn(column: string, columnStates?: Record<string, string>): string {
+  return columnStates?.[column] ?? column;
 }
 
 /** Inverse mapping: a board column back to a ticket status. */
@@ -78,7 +94,9 @@ export function parseWorkItem(
   }
   const parsed = TicketSchema.safeParse(JSON.parse(json));
   if (!parsed.success) return null;
-  const column: string = fields['System.State'] ?? fields['System.BoardColumn'] ?? '';
+  // Prefer the BOARD COLUMN (specific — distinguishes columns that share a state)
+  // and fall back to the raw state for items not yet placed on the board.
+  const column: string = fields['System.BoardColumn'] ?? fields['System.State'] ?? '';
   const status = statusFromColumn(column, cols) ?? parsed.data.status;
   return {
     ...parsed.data,
@@ -92,7 +110,7 @@ export function createArgs(
   coords: { organization?: string; project?: string },
   title: string,
   html: string,
-  column: string,
+  state: string,
 ): string[] {
   const args = [
     'az',
@@ -104,7 +122,7 @@ export function createArgs(
     '--type',
     'Issue',
     '--fields',
-    `System.State=${column}`,
+    `System.State=${state}`,
     '--description',
     html,
     '--output',
@@ -118,6 +136,7 @@ export function createArgs(
 export class AzureTicketProvider implements TicketProvider {
   readonly name = 'azure';
   private readonly columns: ColumnMap;
+  private readonly columnStates?: Record<string, string>;
   constructor(
     private readonly opts: {
       organization?: string;
@@ -125,9 +144,39 @@ export class AzureTicketProvider implements TicketProvider {
       dryRun: boolean;
       cwd?: string;
       columns?: ColumnMap;
+      /** Board-column → System.State map (see BoardConfig.columnStates). */
+      columnStates?: Record<string, string>;
     },
   ) {
     this.columns = opts.columns ?? DEFAULT_COLUMNS;
+    this.columnStates = opts.columnStates;
+  }
+
+  /**
+   * The writable state for a logical status. The user maps each status to a BOARD
+   * COLUMN in `kodi init`, but `System.BoardColumn` is a read-only computed field
+   * (Azure rejects writes with TF401326), so the only thing kodi can set is
+   * `System.State`. We therefore translate the chosen column → the state it maps
+   * to (via `columnStates`) and set that. When several columns share a state, Azure
+   * places the card in the board's default column for that state.
+   */
+  private stateFor(status: TicketStatus): string {
+    return stateForColumn(columnForStatus(status, this.columns), this.columnStates);
+  }
+
+  /** Set work-item `id`'s state (the only board-driving field Azure lets us write). */
+  private setStateArgs(id: string, state: string): string[] {
+    return [
+      'az',
+      'boards',
+      'work-item',
+      'update',
+      '--id',
+      id,
+      '--fields',
+      `System.State=${state}`,
+      ...this.orgArgs(),
+    ];
   }
 
   private coords() {
@@ -155,12 +204,12 @@ export class AzureTicketProvider implements TicketProvider {
     const draft: StoredTicket = { ...input, key: '(pending)', slug };
     const html = descriptionHtml(draft);
     const res = execMutate(
-      createArgs(this.coords(), input.title, html, columnForStatus(input.status, this.columns)),
+      createArgs(this.coords(), input.title, html, this.stateFor(input.status)),
       this.opts.dryRun,
     );
     if (!res.ran) return { ...draft, key: '(dry-run)' };
-    const id = JSON.parse(res.stdout).id;
-    return { ...draft, key: String(id) };
+    const id = String(JSON.parse(res.stdout).id);
+    return { ...draft, key: id };
   }
 
   async get(key: string): Promise<StoredTicket | null> {
@@ -220,20 +269,7 @@ export class AzureTicketProvider implements TicketProvider {
   async setStatus(key: string, status: TicketStatus): Promise<StoredTicket> {
     const current = await this.get(key);
     if (!current) throw new Error(`work-item ${key} not found`);
-    execMutate(
-      [
-        'az',
-        'boards',
-        'work-item',
-        'update',
-        '--id',
-        key,
-        '--fields',
-        `System.State=${columnForStatus(status, this.columns)}`,
-        ...this.orgArgs(),
-      ],
-      this.opts.dryRun,
-    );
+    execMutate(this.setStateArgs(key, this.stateFor(status)), this.opts.dryRun);
     return { ...current, status };
   }
 

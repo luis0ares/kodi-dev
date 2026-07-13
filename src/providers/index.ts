@@ -33,6 +33,7 @@ export function resolveProvider(cwd = process.cwd(), opts: ResolveOptions = {}):
         organization: cfg.organization,
         project: cfg.project,
         columns: cfg.columns,
+        columnStates: cfg.columnStates,
         dryRun: !opts.yes,
         cwd,
       });

@@ -6,6 +6,7 @@ import {
   DEFAULT_COLUMNS,
   descriptionHtml,
   parseWorkItem,
+  stateForColumn,
 } from '../src/providers/azure.js';
 import { TicketSchema, type StoredTicket } from '../src/templates/ticket.js';
 
@@ -54,6 +55,17 @@ describe('azure provider — command construction', () => {
     expect(columnForStatus('To review', cols)).toBe('Review');
     expect(DEFAULT_COLUMNS.todo).toBe('To Do');
   });
+
+  it('resolves a board column to its System.State (identity when unmapped)', () => {
+    // Two DISTINCT columns can share one state — this is why moves set the column
+    // AND a consistent state.
+    const map = { 'In Progress': 'Doing', 'To Review': 'Doing', 'To Do': 'To Do' };
+    expect(stateForColumn('To Review', map)).toBe('Doing');
+    expect(stateForColumn('In Progress', map)).toBe('Doing');
+    // A column with no recorded mapping (or no map at all) falls back to itself.
+    expect(stateForColumn('Done', map)).toBe('Done');
+    expect(stateForColumn('Whatever')).toBe('Whatever');
+  });
 });
 
 describe('azure provider — description round-trip', () => {
@@ -66,6 +78,20 @@ describe('azure provider — description round-trip', () => {
     expect(back!.title).toBe('Add dataset import');
     expect(back!.dependencies).toEqual(['42']);
     expect(back!.status).toBe('In progress'); // derived from the board column
+  });
+
+  it('prefers System.BoardColumn over System.State to distinguish shared-state columns', () => {
+    const t = stored();
+    const desc = descriptionHtml(t);
+    const cols = { todo: 'To Do', inProgress: 'In Progress', toReview: 'To Review', done: 'Done' };
+    // BoardColumn "To Review" and state "Doing" both point at the same state, but
+    // only the column tells us the real bucket → "To review", not "In progress".
+    const back = parseWorkItem(
+      { 'System.Description': desc, 'System.State': 'Doing', 'System.BoardColumn': 'To Review' },
+      7,
+      cols,
+    );
+    expect(back!.status).toBe('To review');
   });
 
   it('returns null when there is no marker', () => {

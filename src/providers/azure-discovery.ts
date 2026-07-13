@@ -125,3 +125,112 @@ export function listIssueStates(
 export function statesInCategory(states: IssueState[], category: string): string[] {
   return states.filter((s) => s.category === category).map((s) => s.name);
 }
+
+/** Parse `az devops team list -o json` into team names. */
+export function parseTeams(json: string): string[] {
+  const d = JSON.parse(json);
+  const items: any[] = Array.isArray(d) ? d : (d.value ?? []);
+  return items.map((t) => t?.name).filter((n): n is string => typeof n === 'string');
+}
+
+/** List the teams in a project (proxy `az devops team list`). */
+export function listTeams(org: string, project: string, run: Runner = defaultRunner): string[] {
+  return parseTeams(
+    run(['az', 'devops', 'team', 'list', '--org', org, '--project', project, '--output', 'json']),
+  );
+}
+
+/** Parse the `work/boards` invoke response into board names. */
+export function parseBoards(json: string): string[] {
+  const d = JSON.parse(json);
+  const items: any[] = Array.isArray(d) ? d : (d.value ?? []);
+  return items.map((b) => b?.name).filter((n): n is string => typeof n === 'string');
+}
+
+/** List a team's boards (proxy `az devops invoke … work/boards`). */
+export function listBoards(
+  org: string,
+  project: string,
+  team: string,
+  run: Runner = defaultRunner,
+): string[] {
+  return parseBoards(
+    run([
+      'az',
+      'devops',
+      'invoke',
+      '--area',
+      'work',
+      '--resource',
+      'boards',
+      '--route-parameters',
+      `project=${project}`,
+      `team=${team}`,
+      '--org',
+      org,
+      '--detect',
+      'false',
+      '--output',
+      'json',
+    ]),
+  );
+}
+
+/**
+ * A single board column as the user sees it on the board — its display name, its
+ * position type (incoming / inProgress / outgoing), and the work-item state it
+ * maps to. Several columns can map to the SAME state.
+ */
+export interface BoardColumn {
+  name: string;
+  columnType: string;
+  /** The `System.State` this column maps the Issue type to. */
+  state: string;
+}
+
+/** Parse the `work/boards/{board}/columns` invoke response into ordered columns. */
+export function parseBoardColumns(json: string): BoardColumn[] {
+  const d = JSON.parse(json);
+  const items: any[] = Array.isArray(d) ? d : (d.value ?? []);
+  return items
+    .map((c) => ({
+      name: c?.name,
+      columnType: c?.columnType ?? '',
+      state: c?.stateMappings?.Issue ?? '',
+    }))
+    .filter((c): c is BoardColumn => typeof c.name === 'string');
+}
+
+/**
+ * List a board's columns in board order (left-to-right, exactly as shown on
+ * screen), with the state each maps to (proxy `az devops invoke … columns`).
+ */
+export function listBoardColumns(
+  org: string,
+  project: string,
+  team: string,
+  board: string,
+  run: Runner = defaultRunner,
+): BoardColumn[] {
+  return parseBoardColumns(
+    run([
+      'az',
+      'devops',
+      'invoke',
+      '--area',
+      'work',
+      '--resource',
+      'columns',
+      '--route-parameters',
+      `project=${project}`,
+      `team=${team}`,
+      `board=${board}`,
+      '--org',
+      org,
+      '--detect',
+      'false',
+      '--output',
+      'json',
+    ]),
+  );
+}

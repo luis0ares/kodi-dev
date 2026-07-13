@@ -17,12 +17,13 @@ import { provisionCollection } from '../memory/store.js';
 import { DEFAULT_COLUMNS } from '../providers/azure.js';
 import {
   getProjectInfo,
-  listIssueStates,
+  listBoardColumns,
+  listBoards,
   listProjects,
+  listTeams,
   normalizeOrgUrl,
   processSupportsIssues,
-  statesInCategory,
-  type IssueState,
+  type BoardColumn,
   type Runner,
 } from '../providers/azure-discovery.js';
 import {
@@ -275,6 +276,8 @@ export interface WizardOptions {
   /** Non-interactive azure values (skip the matching prompt when provided). */
   org?: string;
   project?: string;
+  team?: string;
+  board?: string;
   todoColumn?: string;
   inProgressColumn?: string;
   toReviewColumn?: string;
@@ -349,75 +352,103 @@ export async function configureBoard(
     );
   }
 
-  // Discover the board's Issue states (categorized) so the user picks REAL
-  // columns instead of typing them. States fall into meta-categories:
-  // Proposed = To Do-type, InProgress = doing/review, Completed = done.
-  let states: IssueState[] = [];
-  try {
-    states = listIssueStates(org, project, opts.runner);
-  } catch {
-    /* invoke unavailable → fall back to free-text prompts below */
+  // An Azure board is a per-TEAM presentation layer over the work-item states: it
+  // can show MORE columns than there are states (several columns mapping to the
+  // same state, e.g. an "In Progress" and a "To Review" column both on "Doing").
+  // kodi therefore drives the board by COLUMN, so discovery lists the real columns
+  // the user sees — which first needs the team and board they belong to.
+  let team = opts.team;
+  if (!team) {
+    let teams: string[] = [];
+    try {
+      teams = listTeams(org, project, opts.runner);
+    } catch {
+      /* team list unavailable → free-text below */
+    }
+    team =
+      teams.length === 1
+        ? teams[0]
+        : teams.length > 1
+          ? await prompter.select('Select the team that owns the board', teams)
+          : await prompter.input('Team that owns the board', `${project} Team`);
   }
-  const proposed = statesInCategory(states, 'Proposed');
-  const inProg = statesInCategory(states, 'InProgress');
-  const completed = statesInCategory(states, 'Completed');
+  if (!team) throw new InitAbort('missing: team.');
 
-  // Pick a column: use the flag, else auto (1 candidate), else select, else free-text.
-  const pick = async (
-    flag: string | undefined,
-    message: string,
-    candidates: string[],
-    def: string,
-  ): Promise<string> => {
+  let board = opts.board;
+  if (!board) {
+    let boards: string[] = [];
+    try {
+      boards = listBoards(org, project, team, opts.runner);
+    } catch {
+      /* boards list unavailable → free-text below */
+    }
+    // kodi tickets are Issues, so the "Issues" board is the natural default.
+    const issuesBoard = boards.find((b) => b.toLowerCase() === 'issues');
+    board =
+      boards.length === 1
+        ? boards[0]
+        : issuesBoard
+          ? issuesBoard
+          : boards.length > 1
+            ? await prompter.select('Select the board', boards)
+            : await prompter.input('Board name', 'Issues');
+  }
+  if (!board) throw new InitAbort('missing: board.');
+
+  // Discover the board's columns, in board order (left-to-right, exactly as shown
+  // on screen), each with the state it maps to. We never auto-select: the user
+  // maps every logical status to one of THEIR columns.
+  let boardColumns: BoardColumn[] = [];
+  try {
+    boardColumns = listBoardColumns(org, project, team, board, opts.runner);
+  } catch {
+    /* columns API unavailable → fall back to free-text prompts below */
+  }
+  const columnNames = boardColumns.map((c) => c.name);
+
+  // Pick a column: honor a non-interactive flag, else prompt with the real columns
+  // (board order), else free-text when column discovery is unavailable.
+  const pick = async (flag: string | undefined, message: string, def: string): Promise<string> => {
     if (flag) return flag;
-    if (candidates.length === 1) return candidates[0];
-    if (candidates.length > 1) return prompter.select(message, candidates);
+    if (columnNames.length > 0) return prompter.select(message, columnNames);
     return (await prompter.input(message, def)) || def;
   };
 
-  // To Do column (where new issues are created) — the explicit selection.
-  let todo: string;
-  if (opts.todoColumn) {
-    todo = opts.todoColumn;
-  } else if (states.length > 0 && proposed.length === 0) {
-    throw new InitAbort(
-      'no To Do-type column: the Issue type on this board has no "Proposed" state where new issues can land. ' +
-        'Add a To Do column/state to the board, then re-run `kodi init`.',
-    );
-  } else if (proposed.length > 0) {
-    todo =
-      proposed.length === 1
-        ? proposed[0]
-        : await prompter.select('To Do column (where new issues are created)', proposed);
-  } else {
-    todo = await prompter.input(
+  const columns = {
+    todo: await pick(
+      opts.todoColumn,
       'To Do column (where new issues are created)',
       DEFAULT_COLUMNS.todo,
-    );
-    if (!todo) throw new InitAbort('missing: the To Do column.');
+    ),
+    inProgress: await pick(opts.inProgressColumn, 'In Progress column', DEFAULT_COLUMNS.inProgress!),
+    toReview: await pick(opts.toReviewColumn, 'To Review column', DEFAULT_COLUMNS.toReview!),
+    done: await pick(opts.doneColumn, 'Done column', DEFAULT_COLUMNS.done!),
+  };
+
+  // Record the state each chosen column maps to so runtime moves set a consistent
+  // System.State alongside System.BoardColumn. A column absent from discovery maps
+  // to itself (a board where the column name IS the state name).
+  const stateByColumn = new Map(boardColumns.map((c) => [c.name, c.state]));
+  const columnStates: Record<string, string> = {};
+  for (const col of [columns.todo, columns.inProgress, columns.toReview, columns.done]) {
+    columnStates[col] = stateByColumn.get(col) ?? col;
   }
 
-  const columns = {
-    todo,
-    inProgress: await pick(
-      opts.inProgressColumn,
-      'In Progress column',
-      inProg,
-      DEFAULT_COLUMNS.inProgress!,
-    ),
-    toReview: await pick(
-      opts.toReviewColumn,
-      'To Review column',
-      inProg,
-      DEFAULT_COLUMNS.toReview!,
-    ),
-    done: await pick(opts.doneColumn, 'Done column', completed, DEFAULT_COLUMNS.done!),
-  };
   const repository =
     opts.repository ??
     ((await prompter.input('Repository name for pull requests', project)) || project);
 
-  return { provider: 'azure', prefix: 'KODI', organization: org, project, repository, columns };
+  return {
+    provider: 'azure',
+    prefix: 'KODI',
+    organization: org,
+    project,
+    team,
+    board,
+    repository,
+    columns,
+    columnStates,
+  };
 }
 
 /**
@@ -565,6 +596,8 @@ export function registerInitCommand(program: Command) {
     .option('--prefix <prefix>', 'local ticket key prefix (default KODI)')
     .option('--org <url>', 'azure org URL (non-interactive)')
     .option('--project <name>', 'azure project (non-interactive)')
+    .option('--team <name>', 'azure team that owns the board (non-interactive)')
+    .option('--board <name>', 'azure board name (non-interactive, default Issues)')
     .option('--owner-type <org|user>', 'github board owner type (non-interactive)')
     .option('--project-owner <login>', 'github Projects owner login (org or user)')
     .option('--project-number <n>', 'github Projects board number', (v) => Number(v))
@@ -589,6 +622,8 @@ export function registerInitCommand(program: Command) {
           prefix: o.prefix,
           org: o.org,
           project: o.project,
+          team: o.team,
+          board: o.board,
           ownerType: o.ownerType,
           projectOwner: o.projectOwner,
           projectNumber: o.projectNumber,
