@@ -31,25 +31,7 @@ Two laws hold across every phase:
 one that talks to the human; the WU ("work-up") agents only investigate and report —
 they never interview.
 
-```mermaid
-flowchart TD
-    H([Human]) <-->|grill: WHAT / WHO / HOW / constraints| ML{{main-loop orchestrator}}
-    ML -->|detect & confirm mode| MODE{brownfield or greenfield?}
-
-    MODE -->|code exists| BW[brownfield-wu]
-    MODE -->|new project| GW[greenfield-wu]
-
-    BW -->|technical map:<br/>stack, architecture,<br/>integrations, tests, debt| ML
-    GW -->|domain facts from<br/>seed material| ML
-
-    ML -->|reconcile conflicts,<br/>raise open questions| H
-    ML -->|grill notes + WU report paths| BR[brief]
-
-    BR -->|synthesize| A1[[briefing.md — transient]]
-    BR -->|synthesize| A2[[CLAUDE.md — thin, durable]]
-
-    A1 & A2 --> DONE([suggest /oplan])
-```
+![Briefing phase: main-loop grills the human, brownfield/greenfield work-up agents investigate, brief synthesizes briefing.md + thin CLAUDE.md](images/briefing-phase.svg)
 
 **Agents**
 
@@ -78,42 +60,7 @@ runs a **hub-and-spoke** loop: for each *manager* it spawns the manager, which r
 a plan naming the *leaves* it needs; the **hub (main-loop) spawns the leaves** — managers
 never spawn their own — then the manager validates the leaves' outputs for coherence.
 
-```mermaid
-flowchart TD
-    B[[briefing.md]] --> D[detail]
-    D -->|PRD → docs/prd| SIGN{{human sign-off}}
-    SIGN --> HUB{{main-loop hub}}
-
-    subgraph ARCH [architecture subtree]
-        AM[architect — manager]
-        SA[system-architect — ADR leaf]
-        DE[data-engineer — data-model leaf]
-        AM -.plans leaves.-> HUB
-        HUB ==spawns==> SA & DE
-        SA -->|ADR proposals → sign-off| AM
-        DE -->|data-model spec| AM
-    end
-
-    subgraph UX [ux subtree]
-        UM[ux-lead — manager]
-        RS[researcher — flows leaf]
-        BD[brand — direction leaf]
-        CE[component-engineer — design-system leaf]
-        UM -.plans leaves.-> HUB
-        HUB ==spawns==> RS & BD & CE
-        RS & BD & CE -->|specs| UM
-    end
-
-    HUB ==parallel, sealed-bid==> AM & UM
-    AM -->|validated architecture| HUB
-    UM -->|validated UX| HUB
-
-    HUB -->|reconcile cross-review,<br/>surface conflicts| PH[phases]
-    PH -->|MVP-first phases + deps| QA[qa-planning]
-    QA -->|traceability gate| GATE{all requirements<br/>trace through?}
-    GATE -->|gaps| HUB
-    GATE -->|pass| PLAN[[docs/plan — phased plan]]
-```
+![Planning phase: detail writes the PRD, the main-loop hub spawns the architecture and UX subtrees in parallel, then phases and qa-planning gate into docs/plan](images/planning-phase.svg)
 
 **Order:** `detail` (PRD, human sign-off) → `architect` ∥ `ux-lead` (parallel,
 sealed-bid; the hub reconciles cross-review and surfaces conflicts) → `phases`
@@ -165,40 +112,7 @@ branch, brackets the slice with security, delegates to engineers/testers/gates i
 dependency order, and closes only when every gate is green. It coordinates; it never
 writes feature code, tests, or reviews itself.
 
-```mermaid
-flowchart TD
-    TS[/ticket-start/] -->|ticket + optional complement| BO{{build-orchestrator — hub}}
-    BO -->|1. read ticket, drivers, CLAUDE.md| CTX[/context/]
-    BO -->|2. branch + kodi tickets start| BR[/slice branch · In progress/]
-
-    BO -->|3. guidance pass:<br/>threat model + secure-coding reqs| SG[security]
-    SG --> BO
-
-    subgraph IMPL [4. implement · dependency order: domain → use-case → API → schema → frontend]
-        BE[backend-engineer]
-        FE[frontend-engineer]
-        BT[backend-tester]
-        FT[frontend-tester]
-    end
-    BO ==delegates==> BE & FE & BT & FT
-    BE & FE & BT & FT --> BO
-
-    BO -->|5. tests green → tidy| RF[refactor-engineer]
-    RF -->|behavior-preserving,<br/>commit at each green| BO
-
-    subgraph GATES [6. gate — loop failures back to owner]
-        QI[qa-implementation<br/>DoD: lint/type/tests/coverage + review]
-        QV[qa-visual<br/>frontend only]
-        SV[security — verify pass]
-    end
-    BO ==spawns==> QI & QV & SV
-    QI & QV & SV --> CLOSE{7. all green &<br/>no Critical/High?}
-
-    CLOSE -->|no| BO
-    CLOSE -->|yes| HO[8. hand-off]
-    HO -->|kodi pr create → To Review<br/>kodi tickets hand-off| PR[[PR · To Review]]
-    HO -.->|never to Done — human's call on merge| PR
-```
+![Build phase: build-orchestrator hub drives one slice through context, branch, security guidance, implementation, refactor, gates, and hand-off to a PR in To Review](images/build-phase.svg)
 
 **Agents**
 
@@ -232,30 +146,7 @@ binding policy in `.claude/rules/ticket-completion.md`.
 
 ## How the phases connect
 
-```mermaid
-flowchart LR
-    subgraph P1 [Briefing]
-      direction TB
-      d1[/discover/]
-    end
-    subgraph P2 [Planning]
-      direction TB
-      d2[/oplan/]
-    end
-    subgraph TK [Ticketing]
-      direction TB
-      d3[/tickets/]
-    end
-    subgraph P3 [Build]
-      direction TB
-      d4[/ticket-start/]
-    end
-
-    P1 -->|briefing.md<br/>+ thin CLAUDE.md| P2
-    P2 -->|docs/plan| TK
-    TK -->|tickets on the board| P3
-    P3 -->|PR → To Review| MERGE([human merges → Done])
-```
+![How the phases connect: Briefing to Planning to Ticketing to Build, each hand-off a durable artifact, ending in a human merge to Done](images/phase-flow.svg)
 
 Each hand-off is a **durable artifact**, not a live channel — which is why any phase can
 be re-run, resumed after a `/clear` or `/compact`, or picked up by a fresh session. The

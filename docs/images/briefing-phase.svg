@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8a8aa0"/>
+    </marker>
+    <style>
+      .bg{fill:#fdfdff;}
+      .agent{fill:#eceafd;stroke:#8a7fd4;stroke-width:1.5;}
+      .agentt{fill:#4b3fae;font-size:15px;font-weight:600;text-anchor:middle;font-family:ui-monospace,Menlo,Consolas,monospace;}
+      .hub{fill:#dcd9f7;stroke:#6f5fce;stroke-width:2;}
+      .hubt{fill:#33285d;font-size:15.5px;font-weight:700;text-anchor:middle;}
+      .human{fill:#efe9fb;stroke:#7a6bd0;stroke-width:1.6;}
+      .humant{fill:#3b3170;font-size:15px;font-weight:700;text-anchor:middle;}
+      .dec{fill:#e7e3fb;stroke:#7a6bd0;stroke-width:1.6;}
+      .dect{fill:#33285d;font-size:13px;font-weight:600;text-anchor:middle;}
+      .doct{fill:#6b5a1e;font-size:14px;font-weight:700;text-anchor:middle;}
+      .docs{fill:#8a7d4a;font-size:12px;text-anchor:middle;}
+      .term{fill:#e5e1fb;stroke:#6f5fce;stroke-width:2;}
+      .termt{fill:#33285d;font-size:14px;font-weight:700;text-anchor:middle;}
+      .edge{stroke:#8a8aa0;stroke-width:1.8;fill:none;}
+      .elbl{fill:#50505f;font-size:12.5px;text-anchor:middle;paint-order:stroke;stroke:#fdfdff;stroke-width:3.5px;stroke-linejoin:round;}
+    </style>
+  </defs>
+  <rect class="bg" x="0" y="0" width="900" height="560"/>
+
+  <!-- Human <-> main-loop -->
+  <line class="edge" x1="232" y1="71" x2="232" y2="136" marker-end="url(#arw)"/>
+  <line class="edge" x1="268" y1="136" x2="268" y2="71" marker-end="url(#arw)"/>
+  <text class="elbl" x="150" y="99" text-anchor="end">grill: WHAT / WHO /</text>
+  <text class="elbl" x="150" y="115" text-anchor="end">HOW / constraints</text>
+  <text class="elbl" x="288" y="99" text-anchor="start">reconcile conflicts,</text>
+  <text class="elbl" x="288" y="115" text-anchor="start">raise open questions</text>
+
+  <!-- main-loop -> decision -->
+  <line class="edge" x1="360" y1="168" x2="476" y2="168" marker-end="url(#arw)"/>
+  <text class="elbl" x="418" y="146">detect &amp;</text>
+  <text class="elbl" x="418" y="161">confirm mode</text>
+
+  <!-- decision -> WU agents -->
+  <path class="edge" d="M604,140 C650,110 662,96 674,88" marker-end="url(#arw)"/>
+  <text class="elbl" x="636" y="112">code exists</text>
+  <path class="edge" d="M604,196 C650,232 662,248 674,254" marker-end="url(#arw)"/>
+  <text class="elbl" x="636" y="240">new project</text>
+
+  <!-- WU -> main-loop (report back) -->
+  <path class="edge" d="M674,74 C520,26 400,44 312,134" marker-end="url(#arw)"/>
+  <text class="elbl" x="458" y="34">technical map: stack, architecture,</text>
+  <text class="elbl" x="458" y="50">integrations, tests, debt</text>
+  <path class="edge" d="M674,264 C520,300 400,262 312,200" marker-end="url(#arw)"/>
+  <text class="elbl" x="470" y="302">domain facts from</text>
+  <text class="elbl" x="470" y="318">seed material</text>
+
+  <!-- main-loop -> brief -->
+  <line class="edge" x1="250" y1="196" x2="250" y2="278" marker-end="url(#arw)"/>
+  <text class="elbl" x="165" y="230" text-anchor="end">grill notes +</text>
+  <text class="elbl" x="165" y="246" text-anchor="end">WU report paths</text>
+
+  <!-- brief -> artifacts -->
+  <path class="edge" d="M216,328 C190,356 180,378 176,397" marker-end="url(#arw)"/>
+  <path class="edge" d="M292,328 C350,356 390,376 404,397" marker-end="url(#arw)"/>
+  <text class="elbl" x="150" y="368">synthesize</text>
+  <text class="elbl" x="392" y="360">synthesize</text>
+
+  <!-- artifacts -> suggest -->
+  <path class="edge" d="M176,461 C176,486 230,494 258,503" marker-end="url(#arw)"/>
+  <path class="edge" d="M405,461 C405,486 350,494 322,503" marker-end="url(#arw)"/>
+
+  <!-- Human -->
+  <rect class="human" x="175" y="25" width="150" height="46" rx="23"/>
+  <text class="humant" x="250" y="54">Human</text>
+
+  <!-- main-loop hub -->
+  <polygon class="hub" points="158,140 342,140 360,168 342,196 158,196 140,168"/>
+  <text class="hubt" x="250" y="173">main-loop orchestrator</text>
+
+  <!-- decision diamond -->
+  <polygon class="dec" points="560,116 640,168 560,220 480,168"/>
+  <text class="dect" x="560" y="164">brownfield or</text>
+  <text class="dect" x="560" y="181">greenfield?</text>
+
+  <!-- brownfield-wu -->
+  <rect class="agent" x="674" y="56" width="176" height="58" rx="10"/>
+  <text class="agentt" x="762" y="90">brownfield-wu</text>
+  <!-- greenfield-wu -->
+  <rect class="agent" x="674" y="227" width="176" height="58" rx="10"/>
+  <text class="agentt" x="762" y="261">greenfield-wu</text>
+
+  <!-- brief -->
+  <rect class="agent" x="175" y="282" width="150" height="48" rx="10"/>
+  <text class="agentt" x="250" y="312">brief</text>
+
+  <!-- briefing.md (document) -->
+  <path fill="#fff9ec" stroke="#cbb26a" stroke-width="1.5" d="M75,401 h186 l14,14 v44 h-200 z"/>
+  <path fill="none" stroke="#cbb26a" stroke-width="1.5" d="M261,401 v14 h14"/>
+  <text class="doct" x="171" y="428">briefing.md</text>
+  <text class="docs" x="171" y="445">transient</text>
+
+  <!-- CLAUDE.md (document) -->
+  <path fill="#fff9ec" stroke="#cbb26a" stroke-width="1.5" d="M305,401 h186 l14,14 v44 h-200 z"/>
+  <path fill="none" stroke="#cbb26a" stroke-width="1.5" d="M491,401 v14 h14"/>
+  <text class="doct" x="401" y="428">CLAUDE.md</text>
+  <text class="docs" x="401" y="445">thin · durable</text>
+
+  <!-- suggest /oplan terminal -->
+  <rect class="term" x="200" y="505" width="180" height="46" rx="23"/>
+  <text class="termt" x="290" y="533">suggest /oplan</text>
+</svg>

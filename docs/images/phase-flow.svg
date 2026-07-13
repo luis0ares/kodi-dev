@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 200" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8a8aa0"/>
+    </marker>
+    <style>
+      .phase{fill:#fffdf1;stroke:#d9d9a3;stroke-width:1.5;}
+      .ptitle{fill:#8f8f37;font-size:15px;font-weight:700;text-anchor:middle;}
+      .skill{fill:#eceafd;stroke:#8a7fd4;stroke-width:1.5;}
+      .skilltxt{fill:#4b3fae;font-size:15px;font-weight:600;text-anchor:middle;font-family:ui-monospace,'SFMono-Regular',Menlo,Consolas,monospace;}
+      .end{fill:#e5e1fb;stroke:#6f5fce;stroke-width:2;}
+      .endtxt{fill:#3b3170;font-size:14.5px;font-weight:700;text-anchor:middle;}
+      .edge{stroke:#8a8aa0;stroke-width:1.8;fill:none;}
+      .elbl{fill:#54546a;font-size:13px;text-anchor:middle;}
+    </style>
+  </defs>
+
+  <!-- phase 1 Briefing -->
+  <g>
+    <rect class="phase" x="24" y="36" width="200" height="128" rx="12"/>
+    <text class="ptitle" x="124" y="64">Briefing</text>
+    <rect class="skill" x="64" y="88" width="120" height="46" rx="9"/>
+    <text class="skilltxt" x="124" y="117">/discover</text>
+  </g>
+  <!-- phase 2 Planning -->
+  <g>
+    <rect class="phase" x="319" y="36" width="200" height="128" rx="12"/>
+    <text class="ptitle" x="419" y="64">Planning</text>
+    <rect class="skill" x="359" y="88" width="120" height="46" rx="9"/>
+    <text class="skilltxt" x="419" y="117">/oplan</text>
+  </g>
+  <!-- phase 3 Ticketing -->
+  <g>
+    <rect class="phase" x="614" y="36" width="200" height="128" rx="12"/>
+    <text class="ptitle" x="714" y="64">Ticketing</text>
+    <rect class="skill" x="654" y="88" width="120" height="46" rx="9"/>
+    <text class="skilltxt" x="714" y="117">/tickets</text>
+  </g>
+  <!-- phase 4 Build -->
+  <g>
+    <rect class="phase" x="909" y="36" width="200" height="128" rx="12"/>
+    <text class="ptitle" x="1009" y="64">Build</text>
+    <rect class="skill" x="936" y="88" width="146" height="46" rx="9"/>
+    <text class="skilltxt" x="1009" y="117">/ticket-start</text>
+  </g>
+  <!-- end pill -->
+  <rect class="end" x="1204" y="86" width="212" height="52" rx="26"/>
+  <text class="endtxt" x="1310" y="116">human merges → Done</text>
+
+  <!-- edges -->
+  <line class="edge" x1="224" y1="112" x2="315" y2="112" marker-end="url(#arw)"/>
+  <text class="elbl" x="271" y="98">briefing.md +</text>
+  <text class="elbl" x="271" y="128">thin CLAUDE.md</text>
+
+  <line class="edge" x1="519" y1="112" x2="610" y2="112" marker-end="url(#arw)"/>
+  <text class="elbl" x="564" y="103">docs/plan</text>
+
+  <line class="edge" x1="814" y1="112" x2="905" y2="112" marker-end="url(#arw)"/>
+  <text class="elbl" x="859" y="98">tickets on</text>
+  <text class="elbl" x="859" y="128">the board</text>
+
+  <line class="edge" x1="1109" y1="112" x2="1200" y2="112" marker-end="url(#arw)"/>
+  <text class="elbl" x="1154" y="103">PR → To Review</text>
+</svg>
