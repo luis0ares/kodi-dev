@@ -229,8 +229,14 @@ export class AzureTicketProvider implements TicketProvider {
   }
 
   async list(): Promise<TicketRef[]> {
+    // Select every field parseWorkItem needs (Description carries the base64
+    // marker) so a single WIQL query hydrates all rows. `az boards query` batch-
+    // fetches the listed fields, so this is ONE `az` call regardless of board
+    // size — never a per-item `work-item show` (an N+1 that made a 500-item board
+    // hang for minutes).
     const wiql =
-      "SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = 'Issue' ORDER BY [System.Id]";
+      'SELECT [System.Id], [System.Title], [System.State], [System.BoardColumn], [System.Description] ' +
+      "FROM WorkItems WHERE [System.WorkItemType] = 'Issue' ORDER BY [System.Id]";
     const out = execRead([
       'az',
       'boards',
@@ -246,7 +252,7 @@ export class AzureTicketProvider implements TicketProvider {
     for (const row of rows) {
       const id = row.id ?? row.fields?.['System.Id'];
       if (id == null) continue;
-      const t = await this.get(String(id));
+      const t = parseWorkItem(row.fields ?? {}, Number(id), this.columns);
       if (t) refs.push(toRef(t));
     }
     return refs;
