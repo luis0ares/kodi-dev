@@ -56,6 +56,12 @@ export interface BoardConfig {
   projectNumber?: number;
   /** Board status→column map (Azure states / GitHub Status options). */
   columns?: ColumnMap;
+  /**
+   * Default target branch for `kodi pr create` (the branch PRs merge into), chosen
+   * from the remote's real branches during `kodi init`. Only set for the github /
+   * azure providers. `--target` on the command overrides it.
+   */
+  prTarget?: string;
   /** Memory-store collection binding for this project (see `kodi memory`). */
   memory?: MemoryBinding;
 }

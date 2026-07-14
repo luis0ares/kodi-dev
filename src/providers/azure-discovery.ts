@@ -147,6 +147,43 @@ export function parseBoards(json: string): string[] {
   return items.map((b) => b?.name).filter((n): n is string => typeof n === 'string');
 }
 
+/** Parse `az repos ref list --filter heads -o json`, stripping the `refs/heads/` prefix. */
+export function parseBranchRefs(json: string): string[] {
+  const d = JSON.parse(json);
+  const items: Array<{ name?: string }> = Array.isArray(d) ? d : (d.value ?? []);
+  return items
+    .map((r) => r?.name)
+    .filter((n): n is string => typeof n === 'string')
+    .map((n) => n.replace(/^refs\/heads\//, ''));
+}
+
+/** List a repository's branch names (proxy `az repos ref list --filter heads`). */
+export function listBranches(
+  org: string,
+  project: string,
+  repo: string,
+  run: Runner = defaultRunner,
+): string[] {
+  return parseBranchRefs(
+    run([
+      'az',
+      'repos',
+      'ref',
+      'list',
+      '--repository',
+      repo,
+      '--org',
+      org,
+      '--project',
+      project,
+      '--filter',
+      'heads',
+      '--output',
+      'json',
+    ]),
+  );
+}
+
 /** List a team's boards (proxy `az devops invoke … work/boards`). */
 export function listBoards(
   org: string,

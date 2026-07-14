@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mdToHtml } from '../src/html.js';
+import { listBranches, parseBranchRefs } from '../src/providers/azure-discovery.js';
 import {
   columnForStatus,
   createArgs,
@@ -96,5 +97,25 @@ describe('azure provider — description round-trip', () => {
 
   it('returns null when there is no marker', () => {
     expect(parseWorkItem({ 'System.Description': '<p>plain</p>' }, 1)).toBeNull();
+  });
+});
+
+describe('azure discovery — branch parsing', () => {
+  it('strips refs/heads/ and lists branches via the runner', () => {
+    expect(
+      parseBranchRefs(
+        JSON.stringify({ value: [{ name: 'refs/heads/main' }, { name: 'refs/heads/feat/x' }] }),
+      ),
+    ).toEqual(['main', 'feat/x']);
+
+    const args: string[][] = [];
+    const branches = listBranches('https://dev.azure.com/acme', 'Proj', 'MyRepo', (a) => {
+      args.push(a);
+      return JSON.stringify({ value: [{ name: 'refs/heads/main' }] });
+    });
+    expect(branches).toEqual(['main']);
+    expect(args[0]).toEqual(
+      expect.arrayContaining(['az', 'repos', 'ref', 'list', '--filter', 'heads']),
+    );
   });
 });

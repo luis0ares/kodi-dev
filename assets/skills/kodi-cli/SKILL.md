@@ -117,7 +117,9 @@ kodi pr create \
   --yes
 ```
 
-- `--source` and `--target` (branches) are **required** for `create`.
+- `--source` (branch) is **required** for `create`. `--target` is optional: it
+  defaults to the **`prTarget`** branch chosen during `kodi init`, and overrides it
+  when passed. If neither is set, the command errors asking for one.
 - **`--draft`** opens the PR in draft / work-in-progress (non-active) mode
   (`gh pr create --draft`, `az repos pr create --draft true`).
 - **`--file <path>`** supplies the whole draft as JSON instead of flags — the

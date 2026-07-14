@@ -92,6 +92,23 @@ export function listRepos(owner: string, run: Runner = defaultRunner): string[] 
   return parseRepos(out);
 }
 
+/** Parse newline-delimited branch names (from `gh api … -q .[].name`). */
+export function parseBranchLines(out: string): string[] {
+  return out
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * List a repo's branch names (proxy `gh api repos/OWNER/REPO/branches`). `repo` is
+ * `owner/repo`. Paginated so repos with many branches are fully listed.
+ */
+export function listBranches(repo: string, run: Runner = defaultRunner): string[] {
+  const out = run(['gh', 'api', `repos/${repo}/branches`, '--paginate', '-q', '.[].name']);
+  return parseBranchLines(out);
+}
+
 /** A single-select "Status" field and its column options (id + name). */
 export interface StatusField {
   id: string;

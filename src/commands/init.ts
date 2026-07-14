@@ -19,6 +19,7 @@ import {
   getProjectInfo,
   listBoardColumns,
   listBoards,
+  listBranches as listAzureBranches,
   listProjects,
   listTeams,
   normalizeOrgUrl,
@@ -29,6 +30,7 @@ import {
 import {
   detectRepo,
   hasProjectWriteScope,
+  listBranches as listGithubBranches,
   listProjects as listGithubProjects,
   listRepos,
   listStatusField,
@@ -283,11 +285,41 @@ export interface WizardOptions {
   toReviewColumn?: string;
   doneColumn?: string;
   repository?: string;
+  /** Non-interactive default PR target branch (skips the branch prompt). */
+  prTarget?: string;
   /** Non-interactive github values. */
   ownerType?: string;
   projectOwner?: string;
   projectNumber?: number;
   runner?: Runner;
+}
+
+/**
+ * Choose the default PR target branch. Honors an explicit flag, else lets the user
+ * pick from the remote's real branches (main/master/develop surfaced first), else
+ * falls back to free text. Best-effort: when the branch list is empty (discovery
+ * unavailable) or the environment is non-interactive, it degrades to a sensible
+ * default rather than blocking init.
+ */
+async function pickPrTarget(
+  prompter: Prompter,
+  branches: string[],
+  flag: string | undefined,
+): Promise<string> {
+  if (flag) return flag;
+  const preferred = ['main', 'master', 'develop'].find((b) => branches.includes(b));
+  if (branches.length > 0) {
+    const ordered = preferred ? [preferred, ...branches.filter((b) => b !== preferred)] : branches;
+    try {
+      return await prompter.select('Default target branch for pull requests', ordered);
+    } catch {
+      // non-interactive with real branches → pick the conventional default / first.
+      return preferred ?? branches[0];
+    }
+  }
+  return (
+    (await prompter.input('Default target branch for pull requests', preferred ?? 'main')) || 'main'
+  );
 }
 
 /**
@@ -420,7 +452,11 @@ export async function configureBoard(
       'To Do column (where new issues are created)',
       DEFAULT_COLUMNS.todo,
     ),
-    inProgress: await pick(opts.inProgressColumn, 'In Progress column', DEFAULT_COLUMNS.inProgress!),
+    inProgress: await pick(
+      opts.inProgressColumn,
+      'In Progress column',
+      DEFAULT_COLUMNS.inProgress!,
+    ),
     toReview: await pick(opts.toReviewColumn, 'To Review column', DEFAULT_COLUMNS.toReview!),
     done: await pick(opts.doneColumn, 'Done column', DEFAULT_COLUMNS.done!),
   };
@@ -438,6 +474,15 @@ export async function configureBoard(
     opts.repository ??
     ((await prompter.input('Repository name for pull requests', project)) || project);
 
+  // After the board is mapped, offer the repo's real branches as the default PR target.
+  let azBranches: string[] = [];
+  try {
+    azBranches = listAzureBranches(org, project, repository, opts.runner);
+  } catch {
+    /* branch discovery unavailable → pickPrTarget falls back to free-text */
+  }
+  const prTarget = await pickPrTarget(prompter, azBranches, opts.prTarget);
+
   return {
     provider: 'azure',
     prefix: 'KODI',
@@ -448,6 +493,7 @@ export async function configureBoard(
     repository,
     columns,
     columnStates,
+    prTarget,
   };
 }
 
@@ -568,6 +614,15 @@ async function configureGithub(prompter: Prompter, opts: WizardOptions): Promise
   }
   if (!repository) throw new InitAbort('missing: repository (owner/repo).');
 
+  // After the board is mapped, offer the repo's real branches as the default PR target.
+  let ghBranches: string[] = [];
+  try {
+    ghBranches = listGithubBranches(repository, opts.runner);
+  } catch {
+    /* branch discovery unavailable → pickPrTarget falls back to free-text */
+  }
+  const prTarget = await pickPrTarget(prompter, ghBranches, opts.prTarget);
+
   return {
     provider: 'github',
     prefix: 'KODI',
@@ -575,6 +630,7 @@ async function configureGithub(prompter: Prompter, opts: WizardOptions): Promise
     projectOwner: owner,
     projectNumber: number,
     columns,
+    prTarget,
   };
 }
 
@@ -606,6 +662,7 @@ export function registerInitCommand(program: Command) {
     .option('--to-review-column <name>', 'To Review column')
     .option('--done-column <name>', 'Done column')
     .option('--repository <name>', 'repository for PRs (azure: name; github: owner/repo)')
+    .option('--pr-target <branch>', 'default target branch for pull requests (non-interactive)')
     .action(async (o) => {
       const root = String(o.dir);
 
@@ -632,6 +689,7 @@ export function registerInitCommand(program: Command) {
           toReviewColumn: o.toReviewColumn,
           doneColumn: o.doneColumn,
           repository: o.repository,
+          prTarget: o.prTarget,
         });
       } catch (e) {
         if (e instanceof InitAbort) {

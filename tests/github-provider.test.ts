@@ -11,7 +11,9 @@ import {
   statusFromColumn,
 } from '../src/providers/github.js';
 import {
+  listBranches,
   optionIdFor,
+  parseBranchLines,
   parseProjects,
   parseRepos,
   parseStatusField,
@@ -191,6 +193,17 @@ describe('github discovery — parsing', () => {
     expect(
       parseStatusField(JSON.stringify({ fields: [{ id: 'x', name: 'Title', type: 'text' }] })),
     ).toBeNull();
+  });
+
+  it('parses newline-delimited branch names and lists them via the runner', () => {
+    expect(parseBranchLines('main\n release \n\nfeat/x\n')).toEqual(['main', 'release', 'feat/x']);
+    const args: string[][] = [];
+    const branches = listBranches('acme/app', (a) => {
+      args.push(a);
+      return 'main\nrelease\n';
+    });
+    expect(branches).toEqual(['main', 'release']);
+    expect(args[0]).toContain('repos/acme/app/branches');
   });
 
   it('parses the repo list into owner/repo names', () => {

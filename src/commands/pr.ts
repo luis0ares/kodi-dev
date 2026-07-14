@@ -189,26 +189,34 @@ export function registerPrCommand(program: Command) {
   addTemplateOptions(pr.command('create'))
     .description('Create a PR from a validated template draft')
     .requiredOption('--source <branch>', 'branch the PR is opened from')
-    .requiredOption('--target <branch>', 'branch the PR merges into')
+    .option('--target <branch>', 'branch the PR merges into (default: prTarget from kodi init)')
     .option('--provider <github|azure>', 'override the PR provider')
     .option('--repository <repo>', 'repository (gh: OWNER/REPO; az: name)')
     .option('--draft', 'open the PR in draft / work-in-progress (non-active) mode', false)
     .option('--yes', 'execute (default: dry-run)', false)
     .action((o) => {
       const draft = draftFromOptions(o);
-      const target = resolveTarget(o.provider);
-      const repo = o.repository ?? loadBoardConfig().repository;
+      const provider = resolveTarget(o.provider);
+      const cfg = loadBoardConfig();
+      const repo = o.repository ?? cfg.repository;
+      // Fall back to the default target branch chosen at `kodi init` (prTarget).
+      const targetBranch = o.target ?? cfg.prTarget;
+      if (!targetBranch) {
+        throw new Error(
+          'no target branch: pass --target, or set a default with `kodi init` (saved as prTarget).',
+        );
+      }
       // Enforce the 4000-char ceiling on the canonical markdown body before we
       // hand anything to gh/az — refuse rather than let a provider reject/truncate.
       const body = renderPrMarkdown(draft);
       assertWithinBodyLimit(body);
       let args: string[];
-      if (target === 'github') {
+      if (provider === 'github') {
         const bodyFile = join(mkdtempSync(join(tmpdir(), 'kodi-pr-')), 'body.md');
         writeFileSync(bodyFile, body, 'utf-8');
-        args = githubCreateArgs(draft, bodyFile, o.source, o.target, repo, o.draft);
+        args = githubCreateArgs(draft, bodyFile, o.source, targetBranch, repo, o.draft);
       } else {
-        args = azureCreateArgs(draft, renderPrHtml(draft), o.source, o.target, repo, o.draft);
+        args = azureCreateArgs(draft, renderPrHtml(draft), o.source, targetBranch, repo, o.draft);
       }
       const res = execMutate(args, !o.yes);
       if (res.ran)

@@ -60,9 +60,10 @@ interface AzOpts {
   teams?: string[];
   boards?: string[];
   columns?: AzCol[];
+  branches?: string[];
 }
 
-/** Fake `az`: project list/show, team list, and the boards + board-columns invokes. */
+/** Fake `az`: project list/show, team list, the boards + board-columns invokes, and ref list. */
 function fakeAz(o: AzOpts = {}): Runner {
   const template = o.template ?? 'Basic';
   const teams = o.teams ?? ['EPR-V2 Team'];
@@ -70,12 +71,17 @@ function fakeAz(o: AzOpts = {}): Runner {
   const columns = o.columns ?? BOARD_COLUMNS;
   return (args) => {
     const has = (s: string) => args.includes(s);
-    if (has('team') && has('list')) return JSON.stringify({ value: teams.map((name) => ({ name })) });
+    if (has('team') && has('list'))
+      return JSON.stringify({ value: teams.map((name) => ({ name })) });
     if (has('project') && has('list'))
       return JSON.stringify({ value: [{ name: 'Alpha' }, { name: 'Beta' }] });
     if (has('invoke') && has('columns')) return JSON.stringify({ value: columns });
     if (has('invoke') && has('boards'))
       return JSON.stringify({ value: boards.map((name) => ({ name })) });
+    if (has('repos') && has('ref') && has('list'))
+      return JSON.stringify({
+        value: (o.branches ?? []).map((name) => ({ name: `refs/heads/${name}` })),
+      });
     return JSON.stringify({ capabilities: { processTemplate: { templateName: template } } });
   };
 }
@@ -88,6 +94,7 @@ interface GhOpts {
   repo?: string;
   repos?: string[];
   scopes?: string;
+  branches?: string[];
 }
 
 /** Fake `gh`: token scopes (api -i), project list, field-list, api user (login), repo list/view. */
@@ -108,6 +115,8 @@ function fakeGh(o: GhOpts = {}): Runner {
     if (args[1] === 'api' && args.includes('-i')) {
       return `HTTP/2.0 200 OK\r\nX-Oauth-Scopes: ${o.scopes ?? 'repo, read:project, project'}\r\n\r\n{}`;
     }
+    if (args[1] === 'api' && String(args[2] ?? '').includes('/branches'))
+      return (o.branches ?? []).map((b) => `${b}\n`).join('');
     if (args[1] === 'api') return `${o.login ?? 'octocat'}\n`;
     if (args[1] === 'repo' && args[2] === 'list') {
       return JSON.stringify(
@@ -495,6 +504,84 @@ describe('configureBoard wizard', () => {
         runner: fakeGh(),
       }),
     ).rejects.toThrow(/not found/);
+  });
+
+  it('azure: after mapping columns, offers the repo branches and saves the chosen prTarget', async () => {
+    const cfg = await configureBoard(
+      scripted({
+        // …provider, project, 4 columns, then the PR target branch
+        select: ['azure', 'Beta', 'To Do', 'In Progress', 'To Review', 'Done', 'release/next'],
+        input: ['https://dev.azure.com/acme', 'MyRepo'],
+      }),
+      { runner: fakeAz({ branches: ['main', 'release/next'] }) },
+    );
+    expect(cfg.prTarget).toBe('release/next');
+  });
+
+  it('azure: defaults prTarget to "main" when branch discovery returns nothing', async () => {
+    const cfg = await configureBoard(
+      scripted({
+        select: ['azure', 'Beta', 'To Do', 'In Progress', 'To Review', 'Done'],
+        input: ['https://dev.azure.com/acme', 'MyRepo'],
+      }),
+      { runner: fakeAz() }, // no branches → free-text fallback → default
+    );
+    expect(cfg.prTarget).toBe('main');
+  });
+
+  it('azure: honors --pr-target non-interactively (no branch prompt)', async () => {
+    const cfg = await configureBoard(scripted({}), {
+      provider: 'azure',
+      org: 'https://dev.azure.com/acme',
+      project: 'Beta',
+      team: 'EPR-V2 Team',
+      board: 'Issues',
+      todoColumn: 'To Do',
+      inProgressColumn: 'In Progress',
+      toReviewColumn: 'To Review',
+      doneColumn: 'Done',
+      repository: 'MyRepo',
+      prTarget: 'develop',
+      runner: fakeAz({ branches: ['main', 'develop'] }),
+    });
+    expect(cfg.prTarget).toBe('develop');
+  });
+
+  it('github: after mapping columns, offers the repo branches and saves the chosen prTarget', async () => {
+    const cfg = await configureBoard(
+      scripted({
+        select: [
+          'github',
+          'organization',
+          '#5 Roadmap',
+          'Todo',
+          'In Progress',
+          'In Progress',
+          'Done',
+          'acme/app',
+          'release',
+        ],
+        input: ['acme'],
+      }),
+      { runner: fakeGh({ branches: ['main', 'release'] }) },
+    );
+    expect(cfg.prTarget).toBe('release');
+  });
+
+  it('github: honors --pr-target non-interactively', async () => {
+    const cfg = await configureBoard(scripted({}), {
+      provider: 'github',
+      projectOwner: 'acme',
+      projectNumber: 5,
+      todoColumn: 'Todo',
+      inProgressColumn: 'In Progress',
+      toReviewColumn: 'In Progress',
+      doneColumn: 'Done',
+      repository: 'acme/app',
+      prTarget: 'develop',
+      runner: fakeGh({ branches: ['main', 'develop'] }),
+    });
+    expect(cfg.prTarget).toBe('develop');
   });
 });
 
