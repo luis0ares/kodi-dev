@@ -52,7 +52,16 @@ export function mdToHtml(md: string): string {
         out.push('<ul>');
         list = 'ul';
       }
-      out.push(`<li>${inline(item[1])}</li>`);
+      // Azure DevOps renders the description as HTML and does NOT turn a markdown
+      // task-list marker ("[ ]" / "[x]") into a checkbox — it shows the literal
+      // brackets. Emit a real HTML checkbox input instead so the box is checkable.
+      const task = /^\[([ xX])\]\s+(.*)$/.exec(item[1]);
+      if (task) {
+        const checked = task[1].toLowerCase() === 'x' ? ' checked' : '';
+        out.push(`<li><input type="checkbox"${checked} /> ${inline(task[2])}</li>`);
+      } else {
+        out.push(`<li>${inline(item[1])}</li>`);
+      }
       continue;
     }
     closeList();

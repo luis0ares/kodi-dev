@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Command } from 'commander';
+import { ZodError } from 'zod';
 import { loadBoardConfig } from '../config.js';
 import { execMutate, execRead } from '../exec.js';
 import {
@@ -24,17 +25,54 @@ function resolveTarget(explicit?: string): Target {
   );
 }
 
+/** Fold a repeatable enum flag (e.g. `--type fix --type refactor`) into the
+ * boolean object a checkbox group expects, rejecting unknown values. */
+function checkboxFlags<K extends string>(
+  flag: string,
+  keys: readonly K[],
+  values: string[],
+): Record<K, boolean> {
+  const out = Object.fromEntries(keys.map((k) => [k, false])) as Record<K, boolean>;
+  for (const v of values) {
+    if (!(keys as readonly string[]).includes(v)) {
+      throw new Error(`${flag}: unknown value "${v}" (allowed: ${keys.join(', ')})`);
+    }
+    out[v as K] = true;
+  }
+  return out;
+}
+
+const TYPE_KEYS = ['feature', 'fix', 'improvement', 'refactor', 'documentation'] as const;
+const TESTING_KEYS = ['unit', 'integration', 'manual', 'na'] as const;
+
+/** The template is enforced entirely by {@link PrSchema}. Re-throw a Zod failure
+ * as a readable, section-by-section message instead of a raw JSON dump. */
+function parseDraft(input: unknown): Pr {
+  try {
+    return PrSchema.parse(input);
+  } catch (err) {
+    if (err instanceof ZodError) {
+      const lines = err.issues.map((i) => `  - ${i.path.join('.') || '(draft)'}: ${i.message}`);
+      throw new Error(
+        `PR draft does not satisfy the required template:\n${lines.join('\n')}\n` +
+          `Every section except Notes is required.`,
+      );
+    }
+    throw err;
+  }
+}
+
 function draftFromOptions(o: Record<string, unknown>): Pr {
-  if (o.file) return PrSchema.parse(JSON.parse(readFileSync(String(o.file), 'utf-8')));
-  return PrSchema.parse({
+  if (o.file) return parseDraft(JSON.parse(readFileSync(String(o.file), 'utf-8')));
+  return parseDraft({
     title: o.title,
     summary: o.summary,
+    typeOfChange: checkboxFlags('--type', TYPE_KEYS, (o.type as string[]) ?? []),
     features: o.feature ?? [],
     fixes: o.fix ?? [],
     improvements: o.improvement ?? [],
-    includedChanges: o.change ?? [],
-    vulnerabilities: o.vulnerability ?? [],
     relatedIssues: o.issue ?? [],
+    testing: checkboxFlags('--testing', TESTING_KEYS, (o.testing as string[]) ?? []),
     notes: o.notes,
     reviewers: o.reviewer ?? [],
   });
@@ -46,6 +84,7 @@ export function githubCreateArgs(
   source: string,
   target: string,
   repo?: string,
+  draft = false,
 ): string[] {
   const args = [
     'gh',
@@ -60,6 +99,8 @@ export function githubCreateArgs(
     '--head',
     source,
   ];
+  // gh's --draft is a plain boolean flag; presence opens the PR as a draft.
+  if (draft) args.push('--draft');
   for (const r of pr.reviewers) args.push('--reviewer', r);
   if (repo) args.push('--repo', repo);
   return args;
@@ -71,6 +112,7 @@ export function azureCreateArgs(
   source: string,
   target: string,
   repo?: string,
+  draft = false,
 ): string[] {
   const args = [
     'az',
@@ -86,8 +128,57 @@ export function azureCreateArgs(
     '--target-branch',
     target,
   ];
+  // az's --draft takes an explicit boolean value.
+  if (draft) args.push('--draft', 'true');
   if (repo) args.push('--repository', repo);
   return args;
+}
+
+export function githubEditArgs(id: string, pr: Pr, bodyFile: string, repo?: string): string[] {
+  const args = ['gh', 'pr', 'edit', id, '--title', pr.title, '--body-file', bodyFile];
+  // gh pr edit only adds reviewers (it cannot remove); safe for a body/title edit.
+  for (const r of pr.reviewers) args.push('--add-reviewer', r);
+  if (repo) args.push('--repo', repo);
+  return args;
+}
+
+export function azureUpdateArgs(id: string, pr: Pr, html: string): string[] {
+  // az repos pr update identifies the PR by --id alone (no --repository needed).
+  return ['az', 'repos', 'pr', 'update', '--id', id, '--title', pr.title, '--description', html];
+}
+
+/** Attach the shared template-draft options used by both `create` and `edit`,
+ * so the two commands always parse an identical draft. */
+function addTemplateOptions(cmd: Command): Command {
+  return cmd
+    .option('-f, --file <path>', 'JSON PR draft (validated against the template)')
+    .option('-t, --title <title>')
+    .option('-s, --summary <summary>')
+    .option(
+      '--type <kind>',
+      'Type of Change checkbox: feature|fix|improvement|refactor|documentation (repeatable)',
+      collect,
+      [],
+    )
+    .option('--feature <text>', 'Included Changes › feature (repeatable)', collect, [])
+    .option('--fix <text>', 'Included Changes › fix (repeatable)', collect, [])
+    .option('--improvement <text>', 'Included Changes › improvement (repeatable)', collect, [])
+    .option(
+      '--vulnerability <ref>',
+      'security finding to capture into project memory, referencing its report ' +
+        '(repeatable; captured by the hook, not rendered in the PR body)',
+      collect,
+      [],
+    )
+    .option(
+      '--testing <kind>',
+      'Testing checkbox: unit|integration|manual|na (repeatable)',
+      collect,
+      [],
+    )
+    .option('--issue <ref>', 'related issue / work item (repeatable)', collect, [])
+    .option('--reviewer <name>', 'reviewer (repeatable)', collect, [])
+    .option('--notes <text>');
 }
 
 export function registerPrCommand(program: Command) {
@@ -95,28 +186,13 @@ export function registerPrCommand(program: Command) {
     .command('pr')
     .description('Manage pull requests (proxy gh/az) with a validated template');
 
-  pr.command('create')
+  addTemplateOptions(pr.command('create'))
     .description('Create a PR from a validated template draft')
-    .option('-f, --file <path>', 'JSON PR draft (validated against the template)')
-    .option('-t, --title <title>')
-    .option('-s, --summary <summary>')
-    .option('--feature <text>', 'feature (repeatable)', collect, [])
-    .option('--fix <text>', 'fix (repeatable)', collect, [])
-    .option('--improvement <text>', 'improvement (repeatable)', collect, [])
-    .option('--change <text>', 'included change (repeatable)', collect, [])
-    .option(
-      '--vulnerability <ref>',
-      'security vulnerability the slice surfaced, referencing its report (repeatable)',
-      collect,
-      [],
-    )
-    .option('--issue <ref>', 'related issue (repeatable)', collect, [])
-    .option('--reviewer <name>', 'reviewer (repeatable)', collect, [])
-    .option('--notes <text>')
     .requiredOption('--source <branch>', 'branch the PR is opened from')
     .requiredOption('--target <branch>', 'branch the PR merges into')
     .option('--provider <github|azure>', 'override the PR provider')
     .option('--repository <repo>', 'repository (gh: OWNER/REPO; az: name)')
+    .option('--draft', 'open the PR in draft / work-in-progress (non-active) mode', false)
     .option('--yes', 'execute (default: dry-run)', false)
     .action((o) => {
       const draft = draftFromOptions(o);
@@ -130,12 +206,39 @@ export function registerPrCommand(program: Command) {
       if (target === 'github') {
         const bodyFile = join(mkdtempSync(join(tmpdir(), 'kodi-pr-')), 'body.md');
         writeFileSync(bodyFile, body, 'utf-8');
-        args = githubCreateArgs(draft, bodyFile, o.source, o.target, repo);
+        args = githubCreateArgs(draft, bodyFile, o.source, o.target, repo, o.draft);
       } else {
-        args = azureCreateArgs(draft, renderPrHtml(draft), o.source, o.target, repo);
+        args = azureCreateArgs(draft, renderPrHtml(draft), o.source, o.target, repo, o.draft);
       }
       const res = execMutate(args, !o.yes);
-      if (res.ran) process.stdout.write((res.stdout.trim() || 'PR created') + '\n');
+      if (res.ran)
+        process.stdout.write(
+          (res.stdout.trim() || `${o.draft ? 'Draft PR' : 'PR'} created`) + '\n',
+        );
+    });
+
+  addTemplateOptions(pr.command('edit <id>'))
+    .description('Edit an existing PR: re-render its body/title from a validated template draft')
+    .option('--provider <github|azure>', 'override the PR provider')
+    .option('--repository <repo>', 'repository (gh: OWNER/REPO; az: name)')
+    .option('--yes', 'execute (default: dry-run)', false)
+    .action((id: string, o: Record<string, unknown>) => {
+      const draft = draftFromOptions(o);
+      const target = resolveTarget(o.provider as string | undefined);
+      const repo = (o.repository as string) ?? loadBoardConfig().repository;
+      // Same body contract as create — the full template is re-validated and re-rendered.
+      const body = renderPrMarkdown(draft);
+      assertWithinBodyLimit(body);
+      let args: string[];
+      if (target === 'github') {
+        const bodyFile = join(mkdtempSync(join(tmpdir(), 'kodi-pr-')), 'body.md');
+        writeFileSync(bodyFile, body, 'utf-8');
+        args = githubEditArgs(id, draft, bodyFile, repo);
+      } else {
+        args = azureUpdateArgs(id, draft, renderPrHtml(draft));
+      }
+      const res = execMutate(args, !o.yes);
+      if (res.ran) process.stdout.write((res.stdout.trim() || 'PR updated') + '\n');
     });
 
   pr.command('list')
