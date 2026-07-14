@@ -245,7 +245,7 @@ describe('installHarness (files only)', () => {
     for (const a of ['brief', 'architect', 'build-orchestrator']) {
       expect(existsSync(join(dir, '.claude/agents', `${a}.md`))).toBe(true);
     }
-    for (const sk of ['discover', 'oplan', 'tickets', 'ticket-start']) {
+    for (const sk of ['discover', 'oplan', 'tickets', 'ticket-start', 'kodi-cli']) {
       expect(existsSync(join(dir, '.claude/skills', sk, 'SKILL.md'))).toBe(true);
     }
     expect(existsSync(join(dir, '.claude/rules/ticket-completion.md'))).toBe(true);
