@@ -67,9 +67,9 @@ the reviews yourself.
    applicable) `qa-visual` are positive.
 8. **Hand off.** Open the PR to `To Review` via `kodi pr` and run
    `kodi tickets hand-off <key>`. If the `security` verify pass wrote report
-   artifacts under `docs/security/`, list each in the PR by passing
-   `--vulnerability "<severity> — <what> (<report path>)"` per report, so reviewers
-   see the findings that still need follow-up tickets. NEVER move the ticket to
+   artifacts under `docs/security/`, capture each by passing
+   `--vulnerability "<severity> — <what> (<report path>)"` per report, which the hook
+   records into project memory as a `gotcha` for follow-up tickets. NEVER move the ticket to
    `Done` — that is the
    human's call on merge. This is binding policy: see
    `.claude/rules/ticket-completion.md` (In review + PR on finish; `Done` only on

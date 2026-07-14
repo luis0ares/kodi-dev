@@ -138,8 +138,8 @@ no open Critical/High security finding, and `qa-implementation` (and `qa-visual`
 slice touched frontend) are positive. On close, the orchestrator opens a
 **template-validated PR** to **`To Review`** via `kodi pr` and runs `kodi tickets
 hand-off`. If the security verify pass wrote reports under `docs/security/`, each is
-listed on the PR (`--vulnerability`) so reviewers see findings that still need follow-up
-tickets. The ticket is **never** moved to `Done` — that is the human's call on merge,
+passed via `--vulnerability` so the hook captures the finding into project memory (as a
+`gotcha`) for follow-up tickets. The ticket is **never** moved to `Done` — that is the human's call on merge,
 binding policy in `.claude/rules/ticket-completion.md`.
 
 ---

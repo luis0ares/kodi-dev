@@ -168,9 +168,11 @@ not to edit it. Mutations always go through the CLI.
 
 ### Pull requests
 
-Every PR follows a **strict template validated in code** (title, summary, included
-changes, features/fixes/improvements, surfaced vulnerabilities, related issues,
-reviewers). Bodies are portable and capped so no provider truncates them.
+Every PR follows a **strict template validated in code** (summary, type of change,
+included changes → features/fixes/improvements, related issues / work items, testing,
+and a checklist). Every section is always rendered — only notes is optional — so the
+created PR never collapses to a bare summary. Bodies are portable and capped so no
+provider truncates them.
 
 ```bash
 kodi pr create --source feat/x --target main -t "Title" -s "Summary" --yes

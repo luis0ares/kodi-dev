@@ -84,4 +84,5 @@ real, actionable issues, not noise.
   (`backend` / `frontend` / `mobile` / `xpto` / …) — e.g.
   `security(backend): report SQLi in KODI-014 login`.
 - **Surface the reports at hand-off.** Tell the build-orchestrator which report files
-  you wrote so the PR lists them (it passes each as `kodi pr … --vulnerability`).
+  you wrote so each is captured into project memory (it passes each as
+  `kodi pr … --vulnerability`, which the hook records as a `gotcha` for follow-up).
