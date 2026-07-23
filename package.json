@@ -1,6 +1,6 @@
 {
   "name": "kodi-dev",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "description": "kodi.dev — Claude Code-native agent orchestrator CLI",
   "license": "MIT",
   "author": "Luis Soares",
