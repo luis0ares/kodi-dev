@@ -155,6 +155,33 @@ export function mergePermissions(settings: Record<string, any>): boolean {
   return changed;
 }
 
+/**
+ * Environment variables written into a new project's `settings.json`. kodi drives
+ * work through nested sub-agents (phase → manager → worker), so the default
+ * sub-agent spawn-depth ceiling is lifted to keep that delegation chain from being
+ * cut short. Values are strings — Claude Code reads `env` entries as strings.
+ */
+export const DEFAULT_ENV: Record<string, string> = {
+  CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '5',
+};
+
+/**
+ * Idempotently merge the default env vars into a settings object. Only keys that
+ * are ABSENT are added; a value the user has already set is preserved (never
+ * clobbered), so re-running init neither duplicates nor overrides a hand-edited
+ * `env`. Returns whether anything changed.
+ */
+export function mergeEnv(settings: { env?: Record<string, string> }): boolean {
+  const env = (settings.env ??= {});
+  let changed = false;
+  for (const [key, value] of Object.entries(DEFAULT_ENV))
+    if (!(key in env)) {
+      env[key] = value;
+      changed = true;
+    }
+  return changed;
+}
+
 /** The packaged assets directory (agents + skills), resolved next to the bundle. */
 export function defaultAssetsDir(): string {
   return fileURLToPath(new URL('../assets/', import.meta.url));
@@ -237,13 +264,15 @@ export function installHarness(root: string, opts: InstallOptions = {}): string[
   const upsChanged = mergeUserPromptSubmitHook(settings);
   const ptuChanged = mergePostToolUseHook(settings);
   const permsChanged = mergePermissions(settings);
-  if (hookChanged || upsChanged || ptuChanged || permsChanged) {
+  const envChanged = mergeEnv(settings);
+  if (hookChanged || upsChanged || ptuChanged || permsChanged || envChanged) {
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
     const parts = [
       hookChanged ? 'SessionStart hook' : null,
       upsChanged ? 'UserPromptSubmit hook' : null,
       ptuChanged ? 'PostToolUse hook' : null,
       permsChanged ? 'permissions' : null,
+      envChanged ? 'env' : null,
     ]
       .filter(Boolean)
       .join(' + ');

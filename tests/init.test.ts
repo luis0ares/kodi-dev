@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   configureBoard,
+  DEFAULT_ENV,
   installHarness,
+  mergeEnv,
   mergePermissions,
   mergePostToolUseHook,
   mergeSessionStartHook,
@@ -231,6 +233,26 @@ describe('permissions merge', () => {
   });
 });
 
+describe('env merge', () => {
+  it('seeds the default env vars, is idempotent, and reports the spawn-depth default', () => {
+    const settings: Record<string, any> = {};
+    expect(mergeEnv(settings)).toBe(true);
+    expect(mergeEnv(settings)).toBe(false); // idempotent
+    expect(settings.env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH).toBe('5');
+    expect(DEFAULT_ENV.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH).toBe('5');
+  });
+
+  it('preserves an env var the user already set (never clobbers) and adds missing defaults', () => {
+    const settings: Record<string, any> = {
+      env: { CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '9', FOO: 'bar' },
+    };
+    // the only default key is already present with a custom value → no change
+    expect(mergeEnv(settings)).toBe(false);
+    expect(settings.env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH).toBe('9');
+    expect(settings.env.FOO).toBe('bar');
+  });
+});
+
 describe('installHarness (files only)', () => {
   let dir: string;
   beforeEach(() => {
@@ -245,6 +267,8 @@ describe('installHarness (files only)', () => {
     const settings = JSON.parse(readFileSync(join(dir, '.claude/settings.json'), 'utf-8'));
     expect(settings.permissions.deny).toEqual(expect.arrayContaining(PERMISSION_DENY));
     expect(settings.permissions.allow).toEqual(expect.arrayContaining(PERMISSION_ALLOW));
+    // the sub-agent spawn-depth env default is written
+    expect(settings.env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH).toBe('5');
     // all three memory hooks are wired
     expect(settings.hooks.SessionStart[0].hooks[0].command).toBe('kodi hook session-start');
     expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe(
