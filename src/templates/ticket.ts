@@ -60,15 +60,16 @@ export type StoredTicket = Ticket & { key: string; slug: string };
 export const KEY_NUM_WIDTH = 3;
 
 /**
- * Normalize a dependency reference to the canonical ticket-key form so a
- * hand-typed `KODI-1` resolves against the generated `KODI-001` instead of
- * silently blocking forever. Only values shaped like a prefixed key
- * (`<PREFIX>-<digits>`) are touched: the prefix is upper-cased and the number
- * zero-padded to {@link KEY_NUM_WIDTH}. Bare numeric ids (GitHub issue / Azure
- * work-item numbers) and any other free-form text are returned trimmed but
- * otherwise unchanged, so this is safe to apply on every provider.
+ * Normalize a ticket-key reference to the canonical generated form so a hand-typed
+ * `KODI-1` resolves against the generated `KODI-001` — whether it is a dependency
+ * key or the `<key>` argument of a lookup command (get / set-status / start / …).
+ * Only values shaped like a prefixed key (`<PREFIX>-<digits>`) are touched: the
+ * prefix is upper-cased and the number zero-padded to {@link KEY_NUM_WIDTH}. Bare
+ * numeric ids (GitHub issue / Azure work-item numbers) and any other free-form
+ * text are returned trimmed but otherwise unchanged, so this is safe on every
+ * provider.
  */
-export function canonicalizeDependencyKey(ref: string): string {
+export function canonicalizeTicketKey(ref: string): string {
   const trimmed = ref.trim();
   const m = /^([A-Za-z][A-Za-z0-9]*)-0*(\d+)$/.exec(trimmed);
   if (!m) return trimmed;

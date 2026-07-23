@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import { LegacyDataError, type LegacyDataReport } from '../providers/local.js';
 import { resolveProvider } from '../providers/index.js';
-import type { TicketProvider } from '../providers/types.js';
+import type { TicketProvider, TicketRef } from '../providers/types.js';
 import {
-  canonicalizeDependencyKey,
+  canonicalizeTicketKey,
   TicketSchema,
   TICKET_STATUSES,
   type Ticket,
@@ -35,7 +35,7 @@ function draftFromOptions(o: Record<string, unknown>): Ticket {
         },
         notes: o.notes,
       });
-  draft.dependencies = draft.dependencies.map(canonicalizeDependencyKey);
+  draft.dependencies = draft.dependencies.map(canonicalizeTicketKey);
   return draft;
 }
 
@@ -137,10 +137,21 @@ export function registerTicketsCommand(program: Command) {
     });
 
   tickets
+    .command('tree')
+    .description('Dependency tree of every not-done ticket, with its status')
+    .option('--json', 'machine-readable output', false)
+    .action(async (o) => {
+      const refs = await resolveProvider().list();
+      const forest = buildDependencyForest(refs);
+      out(forest.map(treeNodeToJson), o.json, () => renderForest(forest));
+    });
+
+  tickets
     .command('get <key>')
     .description('Show one ticket')
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
+      key = canonicalizeTicketKey(key);
       const t = await resolveProvider().get(key);
       if (!t) {
         process.stderr.write(`ticket ${key} not found\n`);
@@ -156,6 +167,7 @@ export function registerTicketsCommand(program: Command) {
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, status, o) => {
+      key = canonicalizeTicketKey(key);
       if (!TICKET_STATUSES.includes(status as TicketStatus)) {
         process.stderr.write(`invalid status "${status}". One of: ${TICKET_STATUSES.join(', ')}\n`);
         process.exitCode = 1;
@@ -175,6 +187,7 @@ export function registerTicketsCommand(program: Command) {
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
+      key = canonicalizeTicketKey(key);
       const t = await resolveProvider(process.cwd(), { yes: o.yes }).start(key, {
         branch: o.branch,
       });
@@ -187,6 +200,7 @@ export function registerTicketsCommand(program: Command) {
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
+      key = canonicalizeTicketKey(key);
       await resolveProvider(process.cwd(), { yes: o.yes }).delete(key);
       out({ deleted: key }, o.json, () => `Deleted ${key}`);
     });
@@ -212,10 +226,11 @@ export function registerTicketsCommand(program: Command) {
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
+      key = canonicalizeTicketKey(key);
       const patch: Partial<Ticket> = o.file
         ? TicketSchema.partial().parse(JSON.parse(readFileSync(String(o.file), 'utf-8')))
         : buildPatch(o);
-      if (patch.dependencies) patch.dependencies = patch.dependencies.map(canonicalizeDependencyKey);
+      if (patch.dependencies) patch.dependencies = patch.dependencies.map(canonicalizeTicketKey);
       const provider = resolveProvider(process.cwd(), { yes: o.yes });
       if (patch.dependencies) await warnUnknownDependencies(provider, patch.dependencies);
       const t = await provider.amend(key, patch);
@@ -228,6 +243,7 @@ export function registerTicketsCommand(program: Command) {
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, pr, o) => {
+      key = canonicalizeTicketKey(key);
       const t = await resolveProvider(process.cwd(), { yes: o.yes }).amend(key, { prUrl: pr });
       out(t, o.json, () => `${t.key} ↔ ${pr}`);
     });
@@ -239,6 +255,7 @@ export function registerTicketsCommand(program: Command) {
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
+      key = canonicalizeTicketKey(key);
       const provider = resolveProvider(process.cwd(), { yes: o.yes });
       const current = await provider.get(key);
       if (!current) {
@@ -247,7 +264,7 @@ export function registerTicketsCommand(program: Command) {
         return;
       }
       if (o.add.length) {
-        const added = (o.add as string[]).map(canonicalizeDependencyKey);
+        const added = (o.add as string[]).map(canonicalizeTicketKey);
         await warnUnknownDependencies(provider, added);
         const deps = Array.from(new Set([...current.dependencies, ...added]));
         const t = await provider.amend(key, { dependencies: deps });
@@ -268,6 +285,7 @@ export function registerTicketsCommand(program: Command) {
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
+      key = canonicalizeTicketKey(key);
       const provider = resolveProvider(process.cwd(), { yes: o.yes });
       if (o.pr) await provider.amend(key, { prUrl: o.pr });
       const t = await provider.setStatus(key, 'To review');
@@ -279,6 +297,101 @@ export function registerTicketsCommand(program: Command) {
 
 function collect(value: string, previous: string[]): string[] {
   return previous.concat([value]);
+}
+
+/**
+ * A node in the not-done dependency forest built by {@link buildDependencyForest}.
+ * `base` marks a dependency-free root (nothing left to do before it — a "start
+ * here" ticket); `repeat` marks a node re-encountered via a second dependency edge
+ * (a DAG), shown once more as a reference but not re-expanded.
+ */
+export interface TreeNode {
+  ref: TicketRef;
+  children: TreeNode[];
+  base: boolean;
+  repeat: boolean;
+}
+
+/** Numeric-aware key sort so `1206` < `1210` and `KODI-2` < `KODI-10`. */
+function byKeyNumeric(a: TicketRef, b: TicketRef): number {
+  return a.key.localeCompare(b.key, undefined, { numeric: true });
+}
+
+/**
+ * Build the dependency forest of every not-done ticket. A ticket hangs beneath
+ * each not-done ticket it depends on; a dependency already Done is satisfied and
+ * creates no edge, so a ticket whose blockers are all Done surfaces as a root
+ * ("base"). Done tickets are excluded entirely. DAG re-encounters are shown once
+ * (marked `repeat`) and not re-expanded, and any node left unreachable by a
+ * dependency cycle is still surfaced as a non-base pseudo-root so nothing is lost.
+ */
+export function buildDependencyForest(refs: TicketRef[]): TreeNode[] {
+  const active = refs.filter((t) => t.status !== 'Done');
+  const byKey = new Map(active.map((t) => [t.key, t]));
+  const children = new Map<string, TicketRef[]>();
+  const blockerCount = new Map<string, number>();
+  for (const t of active) {
+    let blockers = 0;
+    for (const dep of t.dependencies) {
+      if (!byKey.has(dep)) continue; // dep is Done / unknown → not a tree edge
+      blockers++;
+      const arr = children.get(dep) ?? [];
+      arr.push(t);
+      children.set(dep, arr);
+    }
+    blockerCount.set(t.key, blockers);
+  }
+
+  const seen = new Set<string>();
+  const build = (ref: TicketRef, base: boolean): TreeNode => {
+    if (seen.has(ref.key)) return { ref, children: [], base, repeat: true };
+    seen.add(ref.key);
+    const kids = (children.get(ref.key) ?? [])
+      .slice()
+      .sort(byKeyNumeric)
+      .map((k) => build(k, false));
+    return { ref, children: kids, base, repeat: false };
+  };
+
+  const roots = active.filter((t) => (blockerCount.get(t.key) ?? 0) === 0).sort(byKeyNumeric);
+  const forest = roots.map((r) => build(r, true));
+  // Cycle survivors (never reached from a root) — surface rather than drop them.
+  for (const ref of active.slice().sort(byKeyNumeric))
+    if (!seen.has(ref.key)) forest.push(build(ref, false));
+  return forest;
+}
+
+/** One tree line: `<key>  (<status>)  <title>` plus a base/repeat annotation. */
+function formatTreeNode(node: TreeNode): string {
+  let line = `${node.ref.key}  (${node.ref.status})  ${node.ref.title}`;
+  if (node.repeat) line += '  ⇢ (shown above)';
+  else if (node.base) line += node.ref.status === 'Pending' ? '  [BASE] ◄ start here' : '  [BASE]';
+  return line;
+}
+
+/** Render the forest with box-drawing branches (`├─`/`└─`/`│`). */
+export function renderForest(forest: TreeNode[]): string {
+  if (forest.length === 0) return 'No not-done tickets to show.';
+  const lines: string[] = [];
+  const walk = (node: TreeNode, prefix: string, isLast: boolean) => {
+    lines.push(`${prefix}${isLast ? '└─ ' : '├─ '}${formatTreeNode(node)}`);
+    const childPrefix = `${prefix}${isLast ? '    ' : '│   '}`;
+    node.children.forEach((c, i) => walk(c, childPrefix, i === node.children.length - 1));
+  };
+  forest.forEach((n, i) => walk(n, '', i === forest.length - 1));
+  return lines.join('\n');
+}
+
+/** Serialize a forest node to the nested `--json` shape (mirrors the visual tree). */
+function treeNodeToJson(node: TreeNode): unknown {
+  return {
+    key: node.ref.key,
+    status: node.ref.status,
+    title: node.ref.title,
+    base: node.base,
+    ...(node.repeat ? { repeat: true } : {}),
+    children: node.children.map(treeNodeToJson),
+  };
 }
 
 /**

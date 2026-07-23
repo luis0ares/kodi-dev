@@ -62,6 +62,7 @@ kodi tickets create \
 ```bash
 kodi tickets list                 # all tickets
 kodi tickets list-ready           # tickets with no unmet dependency (+ the blocked set)
+kodi tickets tree                 # dependency tree of every not-done ticket, with status
 kodi tickets get KODI-003         # show one ticket
 kodi tickets next-id              # compute the next ticket key
 kodi tickets deps KODI-003        # read dependencies

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  canonicalizeDependencyKey,
+  canonicalizeTicketKey,
   renderTicketMarkdown,
   slugify,
   TicketSchema,
@@ -36,20 +36,20 @@ describe('ticket template', () => {
 
   it('canonicalizes prefixed dependency keys so hand-typed refs resolve', () => {
     // unpadded / mis-padded / lowercase all fold to the generated key form
-    expect(canonicalizeDependencyKey('KODI-1')).toBe('KODI-001');
-    expect(canonicalizeDependencyKey('kodi-42')).toBe('KODI-042');
-    expect(canonicalizeDependencyKey('KODI-0007')).toBe('KODI-007');
-    expect(canonicalizeDependencyKey('  KODI-3  ')).toBe('KODI-003');
+    expect(canonicalizeTicketKey('KODI-1')).toBe('KODI-001');
+    expect(canonicalizeTicketKey('kodi-42')).toBe('KODI-042');
+    expect(canonicalizeTicketKey('KODI-0007')).toBe('KODI-007');
+    expect(canonicalizeTicketKey('  KODI-3  ')).toBe('KODI-003');
     // already-canonical and wide numbers are unchanged
-    expect(canonicalizeDependencyKey('KODI-001')).toBe('KODI-001');
-    expect(canonicalizeDependencyKey('KODI-1000')).toBe('KODI-1000');
+    expect(canonicalizeTicketKey('KODI-001')).toBe('KODI-001');
+    expect(canonicalizeTicketKey('KODI-1000')).toBe('KODI-1000');
   });
 
   it('leaves bare numeric ids and free-form refs untouched (github/azure safe)', () => {
-    expect(canonicalizeDependencyKey('42')).toBe('42'); // github issue / azure work-item id
-    expect(canonicalizeDependencyKey('#7')).toBe('#7');
-    expect(canonicalizeDependencyKey('N/A')).toBe('N/A');
-    expect(canonicalizeDependencyKey('see AUTH board')).toBe('see AUTH board');
+    expect(canonicalizeTicketKey('42')).toBe('42'); // github issue / azure work-item id
+    expect(canonicalizeTicketKey('#7')).toBe('#7');
+    expect(canonicalizeTicketKey('N/A')).toBe('N/A');
+    expect(canonicalizeTicketKey('see AUTH board')).toBe('see AUTH board');
   });
 
   it('normalizes dependency keys when parsing a draft through the template path', () => {
@@ -60,7 +60,7 @@ describe('ticket template', () => {
       acceptanceCriteria: ['z'],
       dependencies: ['KODI-2'],
     });
-    expect(t.dependencies.map(canonicalizeDependencyKey)).toEqual(['KODI-002']);
+    expect(t.dependencies.map(canonicalizeTicketKey)).toEqual(['KODI-002']);
   });
 
   it('renders a readable markdown body', () => {
