@@ -106,6 +106,22 @@ export function githubCreateArgs(
   return args;
 }
 
+/**
+ * Pull Azure work-item IDs out of the free-form "Related Issues / Work Items"
+ * entries so `az repos pr create` can actually LINK them (`--work-items`) instead
+ * of merely printing them in the description. Accepts a bare id ("123"), a "#123"
+ * reference, and Azure's "AB#123" mention form; ignores "N/A" and any non-numeric
+ * ref (e.g. a GitHub-style "AUTH-9"). Deduplicated, order-preserving.
+ */
+export function azureWorkItemIds(relatedIssues: string[]): string[] {
+  const ids: string[] = [];
+  for (const entry of relatedIssues) {
+    const m = /^(?:AB)?#?(\d+)$/i.exec(entry.trim());
+    if (m && !ids.includes(m[1])) ids.push(m[1]);
+  }
+  return ids;
+}
+
 export function azureCreateArgs(
   pr: Pr,
   html: string,
@@ -130,6 +146,11 @@ export function azureCreateArgs(
   ];
   // az's --draft takes an explicit boolean value.
   if (draft) args.push('--draft', 'true');
+  // Link the referenced work items to the PR (the description text alone does NOT
+  // create the link Azure shows under "Work Items"). `--work-items` is space-
+  // separated; the shell-free spawn passes each id as its own argv entry.
+  const workItems = azureWorkItemIds(pr.relatedIssues);
+  if (workItems.length) args.push('--work-items', ...workItems);
   if (repo) args.push('--repository', repo);
   return args;
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   azureCreateArgs,
   azureUpdateArgs,
+  azureWorkItemIds,
   githubCreateArgs,
   githubEditArgs,
 } from '../src/commands/pr.js';
@@ -190,6 +191,37 @@ describe('pr command construction', () => {
     expect(args).toContain('--source-branch');
     expect(args).toContain('--target-branch');
     expect(args).toContain('--repository');
+  });
+
+  it('extracts azure work-item ids from related issues (bare, #, AB#), ignoring non-numeric', () => {
+    expect(azureWorkItemIds(['123', '#456', 'AB#789', 'N/A', 'AUTH-9', 'ab#123'])).toEqual([
+      '123',
+      '456',
+      '789',
+    ]);
+    // dedupes and preserves first-seen order
+    expect(azureWorkItemIds(['#5', '5', 'AB#5'])).toEqual(['5']);
+    // the default "N/A"-only draft links nothing
+    expect(azureWorkItemIds(['N/A'])).toEqual([]);
+  });
+
+  it('links referenced work items to an azure PR via --work-items (space-separated)', () => {
+    const args = azureCreateArgs(
+      draft({ relatedIssues: ['1219', '#42'] }),
+      '<p>x</p>',
+      'feat/x',
+      'main',
+      'Repo',
+    );
+    const at = args.indexOf('--work-items');
+    expect(at).toBeGreaterThan(-1);
+    expect(args[at + 1]).toBe('1219');
+    expect(args[at + 2]).toBe('42');
+  });
+
+  it('omits --work-items when no related issue is a work-item reference', () => {
+    const args = azureCreateArgs(draft(), '<p>x</p>', 'feat/x', 'main', 'Repo'); // relatedIssues: ['N/A']
+    expect(args).not.toContain('--work-items');
   });
 
   it('builds a github create command (markdown body-file, base/head, reviewers, repo)', () => {
