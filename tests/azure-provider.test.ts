@@ -8,6 +8,7 @@ import {
   descriptionHtml,
   kanbanColumnField,
   listWiql,
+  parseQueryOutput,
   parseWorkItem,
   stateForColumn,
 } from '../src/providers/azure.js';
@@ -68,6 +69,14 @@ describe('azure provider — command construction', () => {
     // A column with no recorded mapping (or no map at all) falls back to itself.
     expect(stateForColumn('Done', map)).toBe('Done');
     expect(stateForColumn('Whatever')).toBe('Whatever');
+  });
+
+  it('tolerates the empty string az prints for a zero-result query (no JSON crash)', () => {
+    // az boards query outputs "" (not "[]") when nothing matches — `tickets list`
+    // / `tree` on an empty board must yield no rows, not "Unexpected end of JSON input".
+    expect(parseQueryOutput('')).toEqual([]);
+    expect(parseQueryOutput('   \n')).toEqual([]);
+    expect(parseQueryOutput('[{"id":7}]')).toEqual([{ id: 7 }]);
   });
 
   it('pins the configured project in the list WIQL (az boards query runs org-wide)', () => {

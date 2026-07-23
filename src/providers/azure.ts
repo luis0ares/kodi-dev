@@ -69,6 +69,15 @@ export function listWiql(project?: string): string {
   );
 }
 
+/**
+ * Parse the rows from `az boards query --output json`. Az prints an EMPTY string
+ * (not `[]`) when the query matches nothing — e.g. a project with no Issues yet —
+ * so an empty/whitespace payload yields no rows rather than a JSON parse crash.
+ */
+export function parseQueryOutput(out: string): any[] {
+  return out.trim() ? JSON.parse(out) : [];
+}
+
 /** Fallback column names when the state file has none yet. */
 export const DEFAULT_COLUMNS: ColumnMap = {
   todo: 'To Do',
@@ -290,7 +299,7 @@ export class AzureTicketProvider implements TicketProvider {
       'json',
       ...this.scopeArgs(),
     ]);
-    const rows: any[] = JSON.parse(out);
+    const rows = parseQueryOutput(out);
     const refs: TicketRef[] = [];
     for (const row of rows) {
       const id = row.id ?? row.fields?.['System.Id'];
