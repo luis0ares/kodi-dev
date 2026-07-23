@@ -6,6 +6,8 @@ import {
   createArgs,
   DEFAULT_COLUMNS,
   descriptionHtml,
+  kanbanColumnField,
+  listWiql,
   parseWorkItem,
   stateForColumn,
 } from '../src/providers/azure.js';
@@ -66,6 +68,38 @@ describe('azure provider — command construction', () => {
     // A column with no recorded mapping (or no map at all) falls back to itself.
     expect(stateForColumn('Done', map)).toBe('Done');
     expect(stateForColumn('Whatever')).toBe('Whatever');
+  });
+
+  it('pins the configured project in the list WIQL (az boards query runs org-wide)', () => {
+    const wiql = listWiql('KodiTest');
+    // scopes to the one project AND keeps the Issue type filter + ordering
+    expect(wiql).toContain("[System.WorkItemType] = 'Issue'");
+    expect(wiql).toContain("[System.TeamProject] = 'KodiTest'");
+    expect(wiql).toMatch(/ORDER BY \[System\.Id\]$/);
+    // still hydrates the Description (carries the base64 marker) in one query
+    expect(wiql).toContain('[System.Description]');
+  });
+
+  it('omits the project filter when no project is configured', () => {
+    expect(listWiql()).not.toContain('System.TeamProject');
+  });
+
+  it("escapes single quotes in the project name (WIQL literal safety)", () => {
+    expect(listWiql("O'Brien's Proj")).toContain("[System.TeamProject] = 'O''Brien''s Proj'");
+  });
+
+  it('discovers the writable per-board Kanban column field (the WEF_… field)', () => {
+    const fields = {
+      'System.State': 'Doing',
+      'System.BoardColumn': 'Doing', // read-only mirror — not this one
+      'WEF_807161377A2D4EA4BE01F1B411161E5F_Kanban.Column': 'Doing',
+      'WEF_807161377A2D4EA4BE01F1B411161E5F_Kanban.Column.Done': false,
+    };
+    expect(kanbanColumnField(fields)).toBe('WEF_807161377A2D4EA4BE01F1B411161E5F_Kanban.Column');
+    // ".Column.Done" and the read-only mirror must not be mistaken for the field
+    expect(kanbanColumnField({ 'System.BoardColumn': 'Doing' })).toBeUndefined();
+    // a not-yet-placed card (no WEF field) yields undefined → move falls back to state-only
+    expect(kanbanColumnField({ 'System.State': 'To Do' })).toBeUndefined();
   });
 });
 

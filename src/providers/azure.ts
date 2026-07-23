@@ -16,17 +16,58 @@ import type { ReadyResult, StartProvenance, TicketProvider, TicketRef } from './
  * work-items; the canonical ticket record rides base64-encoded inside a <pre> in
  * the description (Azure strips HTML comments) so it round-trips losslessly.
  *
- * `kodi init` lets the user map each status to a real BOARD COLUMN, but a board
- * column (`System.BoardColumn`) is a read-only computed field — Azure rejects
- * writes to it. So kodi drives the board via the writable `System.State`,
- * translating the chosen column to its mapped state (`columnStates`). When several
- * columns share a state, Azure decides which one the card sits in. All `az` calls
- * are proxied here; mutations respect dry-run.
+ * `kodi init` lets the user map each status to a real BOARD COLUMN. The visible
+ * `System.BoardColumn` field is a read-only computed mirror (Azure rejects writes
+ * with TF401326), so a card is positioned in TWO steps: its `System.State` is set
+ * (the writable state a column maps to via `columnStates`), AND — the crucial part
+ * when several columns share one state (e.g. a "Doing" and a "To Review" column
+ * both mapping to the "Doing" state) — its hidden, WRITABLE per-board Kanban column
+ * field is set to the exact column name (see {@link kanbanColumnField}). Without
+ * that second write, a hand-off to a shared-state review column would leave the
+ * card sitting in the column it was already in. All `az` calls are proxied here;
+ * mutations respect dry-run.
  */
 
 // Azure sanitizes rich-text descriptions and STRIPS HTML comments, so the
 // canonical record is stored base64-encoded inside a <pre> (which survives).
 const MARKER_RE = /kodi:ticket:([A-Za-z0-9+/=]+)/;
+
+/**
+ * The per-board hidden field that POSITIONS a card within its column, e.g.
+ * `WEF_807161377A2D4EA4BE01F1B411161E5F_Kanban.Column`. Unlike the read-only
+ * `System.BoardColumn` mirror, this field is WRITABLE and is the only way to land
+ * a card in a specific column when several columns share one `System.State`.
+ * The GUID is board-specific, so the field is discovered from the work item
+ * itself rather than hard-coded. Returns the field name, or undefined when the
+ * card is not yet on a board (a freshly created item before placement).
+ */
+const KANBAN_COLUMN_FIELD_RE = /^WEF_[0-9A-Fa-f]+_Kanban\.Column$/;
+
+export function kanbanColumnField(fields: Record<string, unknown>): string | undefined {
+  return Object.keys(fields).find((k) => KANBAN_COLUMN_FIELD_RE.test(k));
+}
+
+/** Escape a value for a single-quoted WIQL string literal (a quote is doubled). */
+function wiqlLiteral(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+/**
+ * The WIQL that hydrates the board in one query. The project is pinned via
+ * `[System.TeamProject]` because `az boards query` does NOT honour `--project` —
+ * it runs the WIQL across the whole ORGANIZATION, so without this filter a
+ * multi-project org would leak every other project's Issues into `tickets list`.
+ * Every field `parseWorkItem` needs is selected (Description carries the base64
+ * marker) so the query batch-fetches all rows — ONE `az` call regardless of board
+ * size, never a per-item `work-item show` (an N+1 that hung large boards).
+ */
+export function listWiql(project?: string): string {
+  const scope = project ? ` AND [System.TeamProject] = '${wiqlLiteral(project)}'` : '';
+  return (
+    'SELECT [System.Id], [System.Title], [System.State], [System.BoardColumn], [System.Description] ' +
+    `FROM WorkItems WHERE [System.WorkItemType] = 'Issue'${scope} ORDER BY [System.Id]`
+  );
+}
 
 /** Fallback column names when the state file has none yet. */
 export const DEFAULT_COLUMNS: ColumnMap = {
@@ -155,28 +196,31 @@ export class AzureTicketProvider implements TicketProvider {
   /**
    * The writable state for a logical status. The user maps each status to a BOARD
    * COLUMN in `kodi init`, but `System.BoardColumn` is a read-only computed field
-   * (Azure rejects writes with TF401326), so the only thing kodi can set is
-   * `System.State`. We therefore translate the chosen column → the state it maps
-   * to (via `columnStates`) and set that. When several columns share a state, Azure
-   * places the card in the board's default column for that state.
+   * (Azure rejects writes with TF401326), so the state kodi can set is
+   * `System.State`. We translate the chosen column → the state it maps to (via
+   * `columnStates`) and set that. On its own this cannot distinguish columns that
+   * share a state — {@link moveArgs} also writes the Kanban column field for that.
    */
   private stateFor(status: TicketStatus): string {
     return stateForColumn(columnForStatus(status, this.columns), this.columnStates);
   }
 
-  /** Set work-item `id`'s state (the only board-driving field Azure lets us write). */
-  private setStateArgs(id: string, state: string): string[] {
-    return [
-      'az',
-      'boards',
-      'work-item',
-      'update',
-      '--id',
-      id,
-      '--fields',
-      `System.State=${state}`,
-      ...this.orgArgs(),
-    ];
+  /**
+   * Move work-item `id` to the column a logical status maps to. Sets `System.State`
+   * (the writable state field) AND, when the card is already on the board so its
+   * hidden Kanban column field exists, that column field — the only field that
+   * lands the card in the exact column when several columns share a state. Passing
+   * both keeps the card's state and column consistent in a single update; when the
+   * Kanban field is absent (a not-yet-placed item) the state write alone still
+   * moves it, and Azure places it in the default column for that state.
+   */
+  private moveArgs(id: string, status: TicketStatus, kanbanField?: string): string[] {
+    const column = columnForStatus(status, this.columns);
+    const fields = [`System.State=${stateForColumn(column, this.columnStates)}`];
+    if (kanbanField) fields.push(`${kanbanField}=${column}`);
+    const args = ['az', 'boards', 'work-item', 'update', '--id', id];
+    for (const f of fields) args.push('--fields', f);
+    return [...args, ...this.orgArgs()];
   }
 
   private coords() {
@@ -212,7 +256,9 @@ export class AzureTicketProvider implements TicketProvider {
     return { ...draft, key: id };
   }
 
-  async get(key: string): Promise<StoredTicket | null> {
+  /** Fetch a work item's raw id + fields (the fields carry both the canonical
+   * marker AND the hidden Kanban column field a move needs). */
+  private showRaw(key: string): { id: number; fields: Record<string, unknown> } {
     const out = execRead([
       'az',
       'boards',
@@ -225,24 +271,21 @@ export class AzureTicketProvider implements TicketProvider {
       ...this.orgArgs(),
     ]);
     const wi = JSON.parse(out);
-    return parseWorkItem(wi.fields ?? {}, wi.id, this.columns);
+    return { id: wi.id, fields: wi.fields ?? {} };
+  }
+
+  async get(key: string): Promise<StoredTicket | null> {
+    const { id, fields } = this.showRaw(key);
+    return parseWorkItem(fields, id, this.columns);
   }
 
   async list(): Promise<TicketRef[]> {
-    // Select every field parseWorkItem needs (Description carries the base64
-    // marker) so a single WIQL query hydrates all rows. `az boards query` batch-
-    // fetches the listed fields, so this is ONE `az` call regardless of board
-    // size — never a per-item `work-item show` (an N+1 that made a 500-item board
-    // hang for minutes).
-    const wiql =
-      'SELECT [System.Id], [System.Title], [System.State], [System.BoardColumn], [System.Description] ' +
-      "FROM WorkItems WHERE [System.WorkItemType] = 'Issue' ORDER BY [System.Id]";
     const out = execRead([
       'az',
       'boards',
       'query',
       '--wiql',
-      wiql,
+      listWiql(this.opts.project),
       '--output',
       'json',
       ...this.scopeArgs(),
@@ -273,9 +316,12 @@ export class AzureTicketProvider implements TicketProvider {
   }
 
   async setStatus(key: string, status: TicketStatus): Promise<StoredTicket> {
-    const current = await this.get(key);
+    const { id, fields } = this.showRaw(key);
+    const current = parseWorkItem(fields, id, this.columns);
     if (!current) throw new Error(`work-item ${key} not found`);
-    execMutate(this.setStateArgs(key, this.stateFor(status)), this.opts.dryRun);
+    // Move by state AND the card's own Kanban column field, so a hand-off reaches
+    // the mapped column even when several columns share the target state.
+    execMutate(this.moveArgs(key, status, kanbanColumnField(fields)), this.opts.dryRun);
     return { ...current, status };
   }
 
