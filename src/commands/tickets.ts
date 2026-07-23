@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import { LegacyDataError, type LegacyDataReport } from '../providers/local.js';
 import { resolveProvider } from '../providers/index.js';
+import type { TicketProvider } from '../providers/types.js';
 import {
+  canonicalizeDependencyKey,
   TicketSchema,
   TICKET_STATUSES,
   type Ticket,
@@ -14,25 +16,54 @@ function out(data: unknown, json: boolean, human: () => string) {
   else process.stdout.write(human() + '\n');
 }
 
-/** Build a ticket draft from a JSON file or from repeatable flags. */
-function draftFromOptions(o: Record<string, unknown>) {
-  if (o.file) {
-    const raw = JSON.parse(readFileSync(String(o.file), 'utf-8'));
-    return TicketSchema.parse(raw);
+/** Build a ticket draft from a JSON file or from repeatable flags. Dependency
+ * keys are canonicalized (e.g. `KODI-1` → `KODI-001`) so hand-typed refs resolve
+ * against the generated keys instead of silently blocking. */
+function draftFromOptions(o: Record<string, unknown>): Ticket {
+  const draft = o.file
+    ? TicketSchema.parse(JSON.parse(readFileSync(String(o.file), 'utf-8')))
+    : TicketSchema.parse({
+        title: o.title,
+        summary: o.summary,
+        acceptanceCriteria: o.ac ?? [],
+        nonGoals: o.nonGoal ?? [],
+        dependencies: o.dep ?? [],
+        drivers: {
+          prd: o.prd,
+          adr: o.adr ?? [],
+          security: o.security,
+        },
+        notes: o.notes,
+      });
+  draft.dependencies = draft.dependencies.map(canonicalizeDependencyKey);
+  return draft;
+}
+
+/**
+ * Best-effort advisory: warn (never block) on any declared dependency key that
+ * matches no existing ticket — the typo that would otherwise keep a ticket
+ * blocked forever with no signal. Runs only when deps are declared, so dep-less
+ * commands pay no extra provider round-trip, and swallows a listing failure so
+ * the advisory can never turn a valid mutation into an error.
+ */
+async function warnUnknownDependencies(
+  provider: Pick<TicketProvider, 'list'>,
+  deps: string[],
+): Promise<void> {
+  if (!deps.length) return;
+  let known: Set<string>;
+  try {
+    known = new Set((await provider.list()).map((t) => t.key));
+  } catch {
+    return;
   }
-  return TicketSchema.parse({
-    title: o.title,
-    summary: o.summary,
-    acceptanceCriteria: o.ac ?? [],
-    nonGoals: o.nonGoal ?? [],
-    dependencies: o.dep ?? [],
-    drivers: {
-      prd: o.prd,
-      adr: o.adr ?? [],
-      security: o.security,
-    },
-    notes: o.notes,
-  });
+  for (const d of deps) {
+    if (!known.has(d)) {
+      process.stderr.write(
+        `warning: dependency ${d} matches no existing ticket (typo, or not created yet?)\n`,
+      );
+    }
+  }
 }
 
 export function registerTicketsCommand(program: Command) {
@@ -57,8 +88,10 @@ export function registerTicketsCommand(program: Command) {
     .option('--json', 'machine-readable output', false)
     .action(async (o) => {
       const draft = draftFromOptions(o);
+      const provider = resolveProvider(process.cwd(), { yes: o.yes });
+      await warnUnknownDependencies(provider, draft.dependencies);
       try {
-        const created = await resolveProvider(process.cwd(), { yes: o.yes }).create(draft);
+        const created = await provider.create(draft);
         out(created, o.json, () => `Created ${created.key} (${created.status}) — ${created.title}`);
       } catch (err) {
         // Clean-start hard stop (ADR-0001 §2.6): render the refusal on BOTH the
@@ -182,7 +215,10 @@ export function registerTicketsCommand(program: Command) {
       const patch: Partial<Ticket> = o.file
         ? TicketSchema.partial().parse(JSON.parse(readFileSync(String(o.file), 'utf-8')))
         : buildPatch(o);
-      const t = await resolveProvider(process.cwd(), { yes: o.yes }).amend(key, patch);
+      if (patch.dependencies) patch.dependencies = patch.dependencies.map(canonicalizeDependencyKey);
+      const provider = resolveProvider(process.cwd(), { yes: o.yes });
+      if (patch.dependencies) await warnUnknownDependencies(provider, patch.dependencies);
+      const t = await provider.amend(key, patch);
       out(t, o.json, () => `Amended ${t.key}`);
     });
 
@@ -211,7 +247,9 @@ export function registerTicketsCommand(program: Command) {
         return;
       }
       if (o.add.length) {
-        const deps = Array.from(new Set([...current.dependencies, ...o.add]));
+        const added = (o.add as string[]).map(canonicalizeDependencyKey);
+        await warnUnknownDependencies(provider, added);
+        const deps = Array.from(new Set([...current.dependencies, ...added]));
         const t = await provider.amend(key, { dependencies: deps });
         out(t.dependencies, o.json, () => `${key} deps: ${t.dependencies.join(', ') || '(none)'}`);
       } else {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canonicalizeDependencyKey,
   renderTicketMarkdown,
   slugify,
   TicketSchema,
@@ -31,6 +32,35 @@ describe('ticket template', () => {
   it('slugifies titles into kebab-case', () => {
     expect(slugify('Add Dataset Import!')).toBe('add-dataset-import');
     expect(slugify('  Wizard — Screens  ')).toBe('wizard-screens');
+  });
+
+  it('canonicalizes prefixed dependency keys so hand-typed refs resolve', () => {
+    // unpadded / mis-padded / lowercase all fold to the generated key form
+    expect(canonicalizeDependencyKey('KODI-1')).toBe('KODI-001');
+    expect(canonicalizeDependencyKey('kodi-42')).toBe('KODI-042');
+    expect(canonicalizeDependencyKey('KODI-0007')).toBe('KODI-007');
+    expect(canonicalizeDependencyKey('  KODI-3  ')).toBe('KODI-003');
+    // already-canonical and wide numbers are unchanged
+    expect(canonicalizeDependencyKey('KODI-001')).toBe('KODI-001');
+    expect(canonicalizeDependencyKey('KODI-1000')).toBe('KODI-1000');
+  });
+
+  it('leaves bare numeric ids and free-form refs untouched (github/azure safe)', () => {
+    expect(canonicalizeDependencyKey('42')).toBe('42'); // github issue / azure work-item id
+    expect(canonicalizeDependencyKey('#7')).toBe('#7');
+    expect(canonicalizeDependencyKey('N/A')).toBe('N/A');
+    expect(canonicalizeDependencyKey('see AUTH board')).toBe('see AUTH board');
+  });
+
+  it('normalizes dependency keys when parsing a draft through the template path', () => {
+    // the CLI maps this over draft.dependencies; verify the helper composes with a real key
+    const t = TicketSchema.parse({
+      title: 'Dependent task',
+      summary: 'y',
+      acceptanceCriteria: ['z'],
+      dependencies: ['KODI-2'],
+    });
+    expect(t.dependencies.map(canonicalizeDependencyKey)).toEqual(['KODI-002']);
   });
 
   it('renders a readable markdown body', () => {

@@ -55,6 +55,26 @@ export type Ticket = z.infer<typeof TicketSchema>;
 /** A fully-persisted ticket always has a key and slug. */
 export type StoredTicket = Ticket & { key: string; slug: string };
 
+/** Canonical width of the numeric part of a local ticket key — matches the
+ * zero-padding `LocalTicketProvider.nextId` mints (`KODI-001`, not `KODI-1`). */
+export const KEY_NUM_WIDTH = 3;
+
+/**
+ * Normalize a dependency reference to the canonical ticket-key form so a
+ * hand-typed `KODI-1` resolves against the generated `KODI-001` instead of
+ * silently blocking forever. Only values shaped like a prefixed key
+ * (`<PREFIX>-<digits>`) are touched: the prefix is upper-cased and the number
+ * zero-padded to {@link KEY_NUM_WIDTH}. Bare numeric ids (GitHub issue / Azure
+ * work-item numbers) and any other free-form text are returned trimmed but
+ * otherwise unchanged, so this is safe to apply on every provider.
+ */
+export function canonicalizeDependencyKey(ref: string): string {
+  const trimmed = ref.trim();
+  const m = /^([A-Za-z][A-Za-z0-9]*)-0*(\d+)$/.exec(trimmed);
+  if (!m) return trimmed;
+  return `${m[1].toUpperCase()}-${m[2].padStart(KEY_NUM_WIDTH, '0')}`;
+}
+
 export function slugify(title: string): string {
   return title
     .toLowerCase()
