@@ -21,8 +21,8 @@ description: >-
 
   Do NOT use this agent to interview the human, to design architecture, or to write
   a PRD/plan (that is the Planning phase). It only writes briefing.md + CLAUDE.md.
-model: inherit
 color: green
+model: opus
 tools: Read, Write, Grep, Glob
 ---
 

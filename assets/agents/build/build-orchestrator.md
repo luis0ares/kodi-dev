@@ -22,8 +22,8 @@ description: >-
 
   Do NOT use this agent for a pure question, a single edit, or to write the code/tests/
   reviews itself — it delegates and enforces the process.
-model: inherit
 color: purple
+model: opus
 tools: Agent, Read, Grep, Glob, Bash, TodoWrite
 ---
 

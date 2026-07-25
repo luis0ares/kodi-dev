@@ -21,8 +21,8 @@ description: >-
 
   Do NOT use this agent for frontend/UI, to design the data model (that is
   data-engineer, whose spec it implements), or to author the test suite (testers).
-model: inherit
 color: green
+model: sonnet
 tools: Read, Write, Edit, Grep, Glob, Bash
 ---
 

@@ -21,8 +21,8 @@ description: >-
 
   Do NOT use this agent to write feature code, frontend/E2E tests (frontend-tester),
   or to change application behavior to make a test pass — surface defects instead.
-model: inherit
 color: cyan
+model: sonnet
 tools: Read, Write, Edit, Grep, Glob, Bash
 ---
 

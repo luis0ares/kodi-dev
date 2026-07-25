@@ -21,8 +21,8 @@ description: >-
 
   Do NOT use this agent for backend/use-case work, to define the design system (that
   is component-engineer, whose spec it consumes), or to author the test suite.
-model: inherit
 color: green
+model: sonnet
 tools: Read, Write, Edit, Grep, Glob, Bash
 ---
 

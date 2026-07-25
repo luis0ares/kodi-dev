@@ -22,8 +22,8 @@ description: >-
 
   Do NOT use this agent to implement features, write the primary tests, or do the
   visual/security review (qa-visual / security) — it runs the DoD gate and reviews.
-model: inherit
 color: yellow
+model: opus
 tools: Read, Grep, Glob, Bash
 ---
 

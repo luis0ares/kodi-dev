@@ -24,8 +24,8 @@ description: >-
   Do NOT use this agent to add features or fix bugs (that changes behavior), to
   refactor without a green test suite (that is editing, not refactoring), or to run
   the DoD gate itself (that is qa-implementation).
-model: inherit
 color: blue
+model: sonnet
 tools: Read, Write, Edit, Grep, Glob, Bash
 ---
 

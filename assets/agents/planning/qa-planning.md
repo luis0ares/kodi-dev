@@ -21,8 +21,8 @@ description: >-
 
   Do NOT use this agent to write or fix artifacts, split phases, or make product
   decisions — it validates and routes gaps to the owning agent.
-model: inherit
 color: yellow
+model: opus
 tools: Read, Grep, Glob
 ---
 

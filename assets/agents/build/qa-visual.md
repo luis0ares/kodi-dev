@@ -15,8 +15,8 @@ description: >-
 
   Do NOT use this agent on backend-only slices, to implement UI, or to run the code
   DoD gate (qa-implementation).
-model: inherit
 color: yellow
+model: opus
 tools: Read, Grep, Glob, Bash
 ---
 

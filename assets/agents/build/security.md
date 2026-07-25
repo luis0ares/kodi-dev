@@ -22,8 +22,8 @@ description: >-
 
   Do NOT use this agent to implement fixes or write features — it is the security
   authority that reviews, ranks, and routes findings to the owning engineer.
-model: inherit
 color: red
+model: opus
 tools: Read, Grep, Glob, Bash, Write
 ---
 

@@ -21,8 +21,8 @@ description: >-
 
   Do NOT use this agent to write the PRD, design UX, model data (that is
   data-engineer), or to lock an ADR without human approval.
-model: inherit
 color: blue
+model: opus
 tools: Read, Write, Grep, Glob
 ---
 

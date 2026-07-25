@@ -16,8 +16,8 @@ description: >-
 
   Do NOT use this agent to define concrete design tokens/components (component-engineer),
   map user flows (researcher), or write frontend code.
-model: inherit
 color: magenta
+model: opus
 tools: Read, Write, Grep, Glob
 ---
 

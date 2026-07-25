@@ -21,8 +21,8 @@ description: >-
 
   Do NOT use this agent to interview the human, to make product/scope decisions, or on
   a greenfield project with no code (use greenfield-wu there).
-model: inherit
 color: blue
+model: opus
 tools: Read, Grep, Glob, Bash
 ---
 
