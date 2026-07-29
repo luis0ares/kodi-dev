@@ -13,6 +13,7 @@ import {
   stateForColumn,
 } from '../src/providers/azure.js';
 import { TicketSchema, type StoredTicket } from '../src/templates/ticket.js';
+import { azFileArg } from '../src/tmpfile.js';
 
 function stored(over: Record<string, unknown> = {}): StoredTicket {
   const t = TicketSchema.parse({
@@ -50,6 +51,24 @@ describe('azure provider — command construction', () => {
     expect(args).toContain('--organization');
     expect(args).toContain('https://dev.azure.com/acme');
     expect(args).toContain('Proj');
+  });
+
+  it('routes the multi-line work-item description through an @file ref (Windows .cmd shim safety)', () => {
+    // descriptionHtml is genuinely multi-line (body + <pre> marker on its own line);
+    // inline, az's Windows `.cmd` shim would truncate it — losing the base64 marker.
+    const html = descriptionHtml(stored());
+    expect(html).toContain('\n');
+    const descriptionArg = azFileArg(html, 'kodi-test-');
+    const args = createArgs(
+      { organization: 'https://dev.azure.com/acme', project: 'Proj' },
+      'T',
+      descriptionArg,
+      'To Do',
+    );
+    const desc = args[args.indexOf('--description') + 1];
+    expect(desc).toBe(descriptionArg);
+    expect(desc.startsWith('@')).toBe(true);
+    for (const a of args) expect(a).not.toContain('\n');
   });
 
   it('maps statuses to board columns via the column map', () => {
@@ -93,7 +112,7 @@ describe('azure provider — command construction', () => {
     expect(listWiql()).not.toContain('System.TeamProject');
   });
 
-  it("escapes single quotes in the project name (WIQL literal safety)", () => {
+  it('escapes single quotes in the project name (WIQL literal safety)', () => {
     expect(listWiql("O'Brien's Proj")).toContain("[System.TeamProject] = 'O''Brien''s Proj'");
   });
 

@@ -13,6 +13,7 @@ import {
   renderPrHtml,
   renderPrMarkdown,
 } from '../src/templates/pr.js';
+import { azFileArg } from '../src/tmpfile.js';
 
 function draft(over: Record<string, unknown> = {}) {
   return PrSchema.parse({
@@ -265,6 +266,27 @@ describe('pr command construction', () => {
     expect(args).toContain('--title');
     expect(args).toContain('--description');
     expect(args).not.toContain('--repository');
+  });
+
+  it('routes the multi-line azure PR description through an @file ref (Windows .cmd shim safety)', () => {
+    // A real, multi-line HTML body — the shape that az's Windows `.cmd` shim would
+    // truncate at the first newline if passed inline.
+    const html = renderPrHtml(draft());
+    expect(html).toContain('\n'); // precondition: the body really is multi-line
+    const descriptionArg = azFileArg(html, 'kodi-test-');
+
+    for (const args of [
+      azureCreateArgs(draft(), descriptionArg, 'feat/x', 'main', 'Repo'),
+      azureUpdateArgs('42', draft(), descriptionArg),
+    ]) {
+      // The description is passed as an @<path> token, never inline HTML.
+      const desc = args[args.indexOf('--description') + 1];
+      expect(desc).toBe(descriptionArg);
+      expect(desc.startsWith('@')).toBe(true);
+      // No argv value carries a newline — the invariant that keeps the shim from
+      // dropping the body and every flag after it.
+      for (const a of args) expect(a).not.toContain('\n');
+    }
   });
 
   it('omits --draft by default and adds it when requested', () => {

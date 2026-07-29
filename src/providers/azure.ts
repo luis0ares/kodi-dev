@@ -1,6 +1,7 @@
 import type { ColumnMap } from '../config.js';
 import { execRead, execMutate } from '../exec.js';
 import { mdToHtml } from '../html.js';
+import { azFileArg } from '../tmpfile.js';
 import {
   renderTicketMarkdown,
   slugify,
@@ -156,10 +157,15 @@ export function parseWorkItem(
   };
 }
 
+/**
+ * `descriptionArg` MUST be an `az` `@<file>` reference (see {@link azFileArg}),
+ * never inline HTML: the description is multi-line and an inline value is
+ * truncated at its first newline when `az` runs through its Windows `.cmd` shim.
+ */
 export function createArgs(
   coords: { organization?: string; project?: string },
   title: string,
-  html: string,
+  descriptionArg: string,
   state: string,
 ): string[] {
   const args = [
@@ -174,7 +180,7 @@ export function createArgs(
     '--fields',
     `System.State=${state}`,
     '--description',
-    html,
+    descriptionArg,
     '--output',
     'json',
   ];
@@ -255,9 +261,11 @@ export class AzureTicketProvider implements TicketProvider {
   async create(input: Ticket): Promise<StoredTicket> {
     const slug = input.slug ?? slugify(input.title);
     const draft: StoredTicket = { ...input, key: '(pending)', slug };
-    const html = descriptionHtml(draft);
+    // Route the multi-line HTML through an `@file` ref so it is not truncated
+    // at the first newline by az's Windows `.cmd` shim (see azFileArg).
+    const descriptionArg = azFileArg(descriptionHtml(draft), 'kodi-wi-');
     const res = execMutate(
-      createArgs(this.coords(), input.title, html, this.stateFor(input.status)),
+      createArgs(this.coords(), input.title, descriptionArg, this.stateFor(input.status)),
       this.opts.dryRun,
     );
     if (!res.ran) return { ...draft, key: '(dry-run)' };
@@ -342,10 +350,22 @@ export class AzureTicketProvider implements TicketProvider {
     const current = await this.get(key);
     if (!current) throw new Error(`work-item ${key} not found`);
     const merged: StoredTicket = { ...current, ...patch, key, slug: current.slug };
-    const fields = [`System.Description=${descriptionHtml(merged)}`];
-    if (patch.title) fields.push(`System.Title=${patch.title}`);
-    const args = ['az', 'boards', 'work-item', 'update', '--id', key];
-    for (const f of fields) args.push('--fields', f);
+    // The description is set via `--description @file` (NOT `--fields
+    // System.Description=…`): the `@file` expansion only triggers when the whole
+    // arg value starts with `@`, and it keeps the multi-line body off the argv so
+    // az's Windows `.cmd` shim can't truncate it at the first newline. The title
+    // is single-line, so its dedicated `--title` flag is passed as-is.
+    const args = [
+      'az',
+      'boards',
+      'work-item',
+      'update',
+      '--id',
+      key,
+      '--description',
+      azFileArg(descriptionHtml(merged), 'kodi-wi-'),
+    ];
+    if (patch.title) args.push('--title', patch.title);
     execMutate([...args, ...this.orgArgs()], this.opts.dryRun);
     return merged;
   }
