@@ -140,9 +140,10 @@ provider is read from `.claude/kodi-dev.yaml`.
 
 ```bash
 kodi tickets create -t "Title" -s "Summary" --ac "criterion" --dep KODI-001
-kodi tickets list                    # all tickets
+kodi tickets list                    # open tickets (Done is not fetched)
+kodi tickets list --all              # …including the Done column
 kodi tickets list-ready              # dependency-aware readiness (+ the blocked set)
-kodi tickets get KODI-001
+kodi tickets get KODI-001            # any ticket, Done or not
 kodi tickets deps KODI-001 --add KODI-002   # read or declare dependencies
 kodi tickets set-status KODI-001 Done
 kodi tickets amend KODI-001 --file patch.yaml
@@ -151,6 +152,18 @@ kodi tickets hand-off KODI-001 --pr <url>   # end of slice: → To Review, link 
 
 Every ticket is validated against a strict template before it is written or sent to the
 provider.
+
+**Listings stop at the Done column.** Done is the one column that only grows, and nothing
+that reads a listing renders it — `tree` drops Done nodes, and a dependency that has left
+the listing is treated as satisfied rather than re-fetched to prove it. So `list`, `tree`
+and `list-ready` pull open work only: on Azure the Done filter is applied inside the WIQL,
+so finished descriptions never cross the wire; on GitHub, Done items are dropped before
+their bodies are read, which is where the per-issue API calls (and the narrower rate
+limit) bite. Done tickets are fetched on demand with `tickets list --all`, or individually
+with `tickets get <key>`, which never filters. The trade-off: a dependency key that
+matches nothing now reads as satisfied instead of blocking forever — `create` and `amend`
+warn about unknown keys at write time, confirming each one with a targeted lookup so a
+dependency on finished work stays silent.
 
 ### The local board
 

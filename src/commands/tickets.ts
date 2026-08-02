@@ -47,7 +47,7 @@ function draftFromOptions(o: Record<string, unknown>): Ticket {
  * the advisory can never turn a valid mutation into an error.
  */
 async function warnUnknownDependencies(
-  provider: Pick<TicketProvider, 'list'>,
+  provider: Pick<TicketProvider, 'list' | 'get'>,
   deps: string[],
 ): Promise<void> {
   if (!deps.length) return;
@@ -58,11 +58,23 @@ async function warnUnknownDependencies(
     return;
   }
   for (const d of deps) {
-    if (!known.has(d)) {
-      process.stderr.write(
-        `warning: dependency ${d} matches no existing ticket (typo, or not created yet?)\n`,
-      );
+    if (known.has(d)) continue;
+    // The listing stops at the Done column, so "not listed" is not yet proof of a
+    // typo — a dependency on finished work is the normal case. Confirm with one
+    // targeted read (only for keys the listing did not already vouch for) rather
+    // than warning about every satisfied dependency. A lookup that THROWS counts
+    // as unknown: `az boards work-item show` exits non-zero for an id that does
+    // not exist, and the listing above already proved the provider is reachable.
+    let exists = false;
+    try {
+      exists = (await provider.get(d)) !== null;
+    } catch {
+      exists = false;
     }
+    if (exists) continue;
+    process.stderr.write(
+      `warning: dependency ${d} matches no existing ticket (typo, or not created yet?)\n`,
+    );
   }
 }
 
@@ -109,15 +121,18 @@ export function registerTicketsCommand(program: Command) {
 
   tickets
     .command('list')
-    .description('List all tickets')
+    .description('List open tickets (Done is fetched only with --all)')
+    .option('-a, --all', 'include the Done column', false)
     .option('--json', 'machine-readable output', false)
     .action(async (o) => {
-      const refs = await resolveProvider().list();
-      out(refs, o.json, () =>
-        refs.length
+      const refs = await resolveProvider().list({ includeDone: o.all });
+      out(refs, o.json, () => {
+        const body = refs.length
           ? refs.map((t) => `${t.key}  ${t.status.padEnd(12)}  ${t.title}`).join('\n')
-          : 'No tickets.',
-      );
+          : 'No tickets.';
+        // Say what is missing, or an empty-looking board reads as an empty board.
+        return o.all ? body : `${body}\n(Done tickets not fetched — pass --all)`;
+      });
     });
 
   tickets

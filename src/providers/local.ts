@@ -33,7 +33,14 @@ import {
   upsert,
   type StatusIndexEntry,
 } from './status-index.js';
-import type { ReadyResult, StartProvenance, TicketProvider, TicketRef } from './types.js';
+import { readyFromActive } from './ready.js';
+import type {
+  ListOptions,
+  ReadyResult,
+  StartProvenance,
+  TicketProvider,
+  TicketRef,
+} from './types.js';
 
 const FRONTMATTER = /^---\n([\s\S]*?)\n---\n?/;
 
@@ -314,22 +321,15 @@ export class LocalTicketProvider implements TicketProvider {
     return { ...found.ticket, status: found.entry.column };
   }
 
-  async list(): Promise<TicketRef[]> {
-    return this.collectRefs();
+  async list(opts?: ListOptions): Promise<TicketRef[]> {
+    const refs = this.collectRefs();
+    // Local reads cost nothing, but the CLI surface stays identical across
+    // providers: `tickets list` means open work everywhere, `--all` adds Done.
+    return opts?.includeDone ? refs : refs.filter((t) => t.status !== 'Done');
   }
 
   async listReady(): Promise<ReadyResult> {
-    const all = await this.list();
-    const doneKeys = new Set(all.filter((t) => t.status === 'Done').map((t) => t.key));
-    const ready: TicketRef[] = [];
-    const blocked: ReadyResult['blocked'] = [];
-    for (const t of all) {
-      if (t.status !== 'Pending') continue;
-      const unmet = t.dependencies.filter((d) => !doneKeys.has(d));
-      if (unmet.length === 0) ready.push(t);
-      else blocked.push({ ticket: t, blockedBy: unmet });
-    }
-    return { ready, blocked };
+    return readyFromActive(await this.list());
   }
 
   async setStatus(key: string, status: TicketStatus): Promise<StoredTicket> {

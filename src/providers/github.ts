@@ -12,7 +12,14 @@ import {
   type TicketStatus,
 } from '../templates/ticket.js';
 import { fetchProjectMeta, optionIdFor, type ProjectMeta } from './github-discovery.js';
-import type { ReadyResult, StartProvenance, TicketProvider, TicketRef } from './types.js';
+import { readyFromActive } from './ready.js';
+import type {
+  ListOptions,
+  ReadyResult,
+  StartProvenance,
+  TicketProvider,
+  TicketRef,
+} from './types.js';
 
 /**
  * GitHub ticket provider. Tickets are repo issues whose canonical record rides in
@@ -99,6 +106,24 @@ export function parseItems(json: string): ProjectItem[] {
     });
   }
   return out;
+}
+
+/**
+ * The board items a listing must actually READ. `gh project item-list` hands back
+ * every item with its Status column for one API call, but recovering a ticket's
+ * canonical record can cost a `gh issue view` PER ITEM — so a not-done listing
+ * discards the Done column here, before any body is fetched. That is the whole
+ * rate-limit saving on GitHub, where the budget is far narrower than Azure's.
+ * An item with no Status yet cannot be classified from the column alone, so it is
+ * kept and judged after hydration.
+ */
+export function itemsToHydrate(
+  items: ProjectItem[],
+  cols: ColumnMap,
+  includeDone = false,
+): ProjectItem[] {
+  if (includeDone) return items;
+  return items.filter((i) => !i.statusName || statusFromColumn(i.statusName, cols) !== 'Done');
 }
 
 export function createIssueArgs(
@@ -209,11 +234,15 @@ export class GithubTicketProvider implements TicketProvider {
     ]);
   }
 
+  /** Status from the board column alone — known without reading the issue body. */
+  private columnStatus(item: ProjectItem): TicketStatus | undefined {
+    return item.statusName ? statusFromColumn(item.statusName, this.columns) : undefined;
+  }
+
   private toStored(item: ProjectItem): StoredTicket | null {
     const t = parseMarker(this.bodyFor(item));
     if (!t) return null;
-    const mapped = item.statusName ? statusFromColumn(item.statusName, this.columns) : undefined;
-    const status = mapped ?? t.status;
+    const status = this.columnStatus(item) ?? t.status;
     return { ...t, key: String(item.issueNumber), slug: t.slug ?? slugify(t.title), status };
   }
 
@@ -263,25 +292,20 @@ export class GithubTicketProvider implements TicketProvider {
     return item ? this.toStored(item) : null;
   }
 
-  async list(): Promise<TicketRef[]> {
-    return this.items()
-      .map((i) => this.toStored(i))
-      .filter((t): t is StoredTicket => t !== null)
-      .map(toRef);
+  async list(opts?: ListOptions): Promise<TicketRef[]> {
+    const refs: TicketRef[] = [];
+    for (const item of itemsToHydrate(this.items(), this.columns, opts?.includeDone)) {
+      const t = this.toStored(item);
+      if (!t) continue;
+      // An item with no Status column yet is only classifiable after hydration.
+      if (!opts?.includeDone && t.status === 'Done') continue;
+      refs.push(toRef(t));
+    }
+    return refs;
   }
 
   async listReady(): Promise<ReadyResult> {
-    const all = await this.list();
-    const done = new Set(all.filter((t) => t.status === 'Done').map((t) => t.key));
-    const ready: TicketRef[] = [];
-    const blocked: ReadyResult['blocked'] = [];
-    for (const t of all) {
-      if (t.status !== 'Pending') continue;
-      const unmet = t.dependencies.filter((d) => !done.has(d));
-      if (unmet.length === 0) ready.push(t);
-      else blocked.push({ ticket: t, blockedBy: unmet });
-    }
-    return { ready, blocked };
+    return readyFromActive(await this.list());
   }
 
   async setStatus(key: string, status: TicketStatus): Promise<StoredTicket> {

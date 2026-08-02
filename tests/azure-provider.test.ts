@@ -89,6 +89,21 @@ describe('azure provider — command construction', () => {
     expect(wiql).toContain('[System.Description]');
   });
 
+  it('excludes the Done state SERVER-SIDE so finished tickets are never transferred', () => {
+    // Descriptions are the payload — filtering after the fetch would still pull
+    // (and buffer) every Done ticket, which is what broke listings on a real board.
+    const wiql = listWiql('KodiTest', 'Done');
+    expect(wiql).toContain("[System.State] <> 'Done'");
+    expect(wiql).toContain("[System.WorkItemType] = 'Issue'");
+    expect(wiql).toMatch(/ORDER BY \[System\.Id\]$/);
+    // …and `--all` puts the whole board back (no state predicate at all).
+    expect(listWiql('KodiTest')).not.toContain('<>');
+  });
+
+  it('escapes a quote in the excluded state (WIQL literal safety)', () => {
+    expect(listWiql(undefined, "Won't do")).toContain("[System.State] <> 'Won''t do'");
+  });
+
   it('omits the project filter when no project is configured', () => {
     expect(listWiql()).not.toContain('System.TeamProject');
   });

@@ -5,6 +5,7 @@ import {
   DEFAULT_COLUMNS,
   itemAddArgs,
   itemEditArgs,
+  itemsToHydrate,
   parseItems,
   parseMarker,
   serializeBody,
@@ -156,6 +157,21 @@ describe('github provider — item-list parsing', () => {
       body: '<!-- kodi:ticket {} -->',
     });
     expect(items[1].body).toBeUndefined();
+  });
+
+  it('skips Done items before hydration (issue #8 would cost a `gh issue view`)', () => {
+    const items = parseItems(json);
+    // #8 sits in Done AND arrived without a body — exactly the item whose marker
+    // would need its own API call. A not-done listing must never reach for it.
+    expect(itemsToHydrate(items, DEFAULT_COLUMNS).map((i) => i.issueNumber)).toEqual([7]);
+    expect(itemsToHydrate(items, DEFAULT_COLUMNS, true).map((i) => i.issueNumber)).toEqual([7, 8]);
+  });
+
+  it('keeps an item with no Status column — only hydration can classify it', () => {
+    const items = parseItems(
+      JSON.stringify({ items: [{ id: 'PVTI_x', content: { type: 'Issue', number: 11 } }] }),
+    );
+    expect(itemsToHydrate(items, DEFAULT_COLUMNS).map((i) => i.issueNumber)).toEqual([11]);
   });
 });
 

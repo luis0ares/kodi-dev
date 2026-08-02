@@ -9,7 +9,14 @@ import {
   type Ticket,
   type TicketStatus,
 } from '../templates/ticket.js';
-import type { ReadyResult, StartProvenance, TicketProvider, TicketRef } from './types.js';
+import { readyFromActive } from './ready.js';
+import type {
+  ListOptions,
+  ReadyResult,
+  StartProvenance,
+  TicketProvider,
+  TicketRef,
+} from './types.js';
 
 /**
  * Azure DevOps Boards ticket provider. Tickets are ALWAYS created as Issue
@@ -60,12 +67,21 @@ function wiqlLiteral(value: string): string {
  * Every field `parseWorkItem` needs is selected (Description carries the base64
  * marker) so the query batch-fetches all rows — ONE `az` call regardless of board
  * size, never a per-item `work-item show` (an N+1 that hung large boards).
+ *
+ * `excludeState` drops the Done column SERVER-SIDE, which is the whole point of a
+ * not-done listing: descriptions are the bulk of the payload, so filtering after
+ * the fetch would still transfer (and buffer) every finished ticket. Filtering on
+ * `System.State` rather than `System.BoardColumn` is deliberate — the board-column
+ * mirror is empty for a card not yet placed, and in WIQL a `<>` comparison drops
+ * empty-valued rows, which would silently hide brand-new tickets. Columns sharing
+ * one state are then separated client-side, where the column IS authoritative.
  */
-export function listWiql(project?: string): string {
+export function listWiql(project?: string, excludeState?: string): string {
   const scope = project ? ` AND [System.TeamProject] = '${wiqlLiteral(project)}'` : '';
+  const notDone = excludeState ? ` AND [System.State] <> '${wiqlLiteral(excludeState)}'` : '';
   return (
     'SELECT [System.Id], [System.Title], [System.State], [System.BoardColumn], [System.Description] ' +
-    `FROM WorkItems WHERE [System.WorkItemType] = 'Issue'${scope} ORDER BY [System.Id]`
+    `FROM WorkItems WHERE [System.WorkItemType] = 'Issue'${scope}${notDone} ORDER BY [System.Id]`
   );
 }
 
@@ -288,13 +304,18 @@ export class AzureTicketProvider implements TicketProvider {
     return parseWorkItem(fields, id, this.columns);
   }
 
-  async list(): Promise<TicketRef[]> {
+  /** The `System.State` the Done column maps to — what a listing filters out. */
+  private doneState(): string {
+    return stateForColumn(this.columns.done ?? DEFAULT_COLUMNS.done!, this.columnStates);
+  }
+
+  async list(opts?: ListOptions): Promise<TicketRef[]> {
     const out = execRead([
       'az',
       'boards',
       'query',
       '--wiql',
-      listWiql(this.opts.project),
+      listWiql(this.opts.project, opts?.includeDone ? undefined : this.doneState()),
       '--output',
       'json',
       ...this.scopeArgs(),
@@ -305,23 +326,17 @@ export class AzureTicketProvider implements TicketProvider {
       const id = row.id ?? row.fields?.['System.Id'];
       if (id == null) continue;
       const t = parseWorkItem(row.fields ?? {}, Number(id), this.columns);
-      if (t) refs.push(toRef(t));
+      if (!t) continue;
+      // Second pass on the COLUMN: when several columns share the Done state the
+      // server-side state filter is too coarse, and the column is the truth.
+      if (!opts?.includeDone && t.status === 'Done') continue;
+      refs.push(toRef(t));
     }
     return refs;
   }
 
   async listReady(): Promise<ReadyResult> {
-    const all = await this.list();
-    const done = new Set(all.filter((t) => t.status === 'Done').map((t) => t.key));
-    const ready: TicketRef[] = [];
-    const blocked: ReadyResult['blocked'] = [];
-    for (const t of all) {
-      if (t.status !== 'Pending') continue;
-      const unmet = t.dependencies.filter((d) => !done.has(d));
-      if (unmet.length === 0) ready.push(t);
-      else blocked.push({ ticket: t, blockedBy: unmet });
-    }
-    return { ready, blocked };
+    return readyFromActive(await this.list());
   }
 
   async setStatus(key: string, status: TicketStatus): Promise<StoredTicket> {

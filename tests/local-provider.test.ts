@@ -194,6 +194,20 @@ describe('local provider — key assignment & readiness', () => {
     assertBijection();
   });
 
+  it('lists open work by default and only reaches for Done with includeDone', async () => {
+    const open = await provider.create(draft({ title: 'Still open' }));
+    const done = await provider.create(draft({ title: 'Finished' }));
+    await provider.setStatus(done.key, 'Done');
+
+    const listed = await provider.list();
+    expect(listed.map((t) => t.key)).toEqual([open.key]);
+    expect((await provider.list({ includeDone: true })).map((t) => t.key).sort()).toEqual(
+      [open.key, done.key].sort(),
+    );
+    // get() is the on-demand path — never scoped, whatever the column.
+    expect(await provider.get(done.key)).not.toBeNull();
+  });
+
   it('computes readiness from dependencies', async () => {
     const dep = await provider.create(draft({ title: 'Prerequisite' }));
     const blocked = await provider.create(
