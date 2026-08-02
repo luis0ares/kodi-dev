@@ -122,9 +122,9 @@ export function azureWorkItemIds(relatedIssues: string[]): string[] {
 }
 
 /**
- * `descriptionArg` MUST be an `az` `@<file>` reference (see {@link azFileArg}),
- * never the inline HTML body: a multi-line inline `--description` is truncated at
- * its first newline when `az` runs through its Windows `.cmd` shim.
+ * `descriptionArg` comes from {@link azFileArg}: the inline HTML body everywhere,
+ * an `@<file>` reference on Windows only — where a multi-line inline
+ * `--description` is truncated at its first newline by az's `.cmd` shim.
  */
 export function azureCreateArgs(
   pr: Pr,
@@ -167,8 +167,8 @@ export function githubEditArgs(id: string, pr: Pr, bodyFile: string, repo?: stri
   return args;
 }
 
-/** `descriptionArg` MUST be an `az` `@<file>` reference (see {@link azFileArg}) —
- * an inline multi-line `--description` is truncated by az's Windows `.cmd` shim. */
+/** `descriptionArg` comes from {@link azFileArg} — inline HTML everywhere, an
+ * `@<file>` reference on Windows, whose `.cmd` shim truncates a multi-line value. */
 export function azureUpdateArgs(id: string, pr: Pr, descriptionArg: string): string[] {
   // az repos pr update identifies the PR by --id alone (no --repository needed).
   return [
@@ -253,7 +253,8 @@ export function registerPrCommand(program: Command) {
         const bodyFile = writeTempFile(body, 'kodi-pr-', 'body.md');
         args = githubCreateArgs(draft, bodyFile, o.source, targetBranch, repo, o.draft);
       } else {
-        // `@file` so az's Windows `.cmd` shim can't truncate the multi-line body.
+        // On Windows this becomes an `@file` ref (the `.cmd` shim truncates a
+        // multi-line value); everywhere else it stays the inline HTML body.
         const descriptionArg = azFileArg(renderPrHtml(draft), 'kodi-pr-');
         args = azureCreateArgs(draft, descriptionArg, o.source, targetBranch, repo, o.draft);
       }
@@ -281,7 +282,8 @@ export function registerPrCommand(program: Command) {
         const bodyFile = writeTempFile(body, 'kodi-pr-', 'body.md');
         args = githubEditArgs(id, draft, bodyFile, repo);
       } else {
-        // `@file` so az's Windows `.cmd` shim can't truncate the multi-line body.
+        // On Windows this becomes an `@file` ref (the `.cmd` shim truncates a
+        // multi-line value); everywhere else it stays the inline HTML body.
         args = azureUpdateArgs(id, draft, azFileArg(renderPrHtml(draft), 'kodi-pr-'));
       }
       const res = execMutate(args, !o.yes);

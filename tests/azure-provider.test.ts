@@ -11,6 +11,7 @@ import {
   parseQueryOutput,
   parseWorkItem,
   stateForColumn,
+  updateArgs,
 } from '../src/providers/azure.js';
 import { TicketSchema, type StoredTicket } from '../src/templates/ticket.js';
 import { azFileArg } from '../src/tmpfile.js';
@@ -53,12 +54,26 @@ describe('azure provider — command construction', () => {
     expect(args).toContain('Proj');
   });
 
-  it('routes the multi-line work-item description through an @file ref (Windows .cmd shim safety)', () => {
-    // descriptionHtml is genuinely multi-line (body + <pre> marker on its own line);
-    // inline, az's Windows `.cmd` shim would truncate it — losing the base64 marker.
+  it('sends the work-item description INLINE off Windows (unchanged behaviour)', () => {
+    // descriptionHtml is genuinely multi-line (body + <pre> marker on its own line).
     const html = descriptionHtml(stored());
     expect(html).toContain('\n');
-    const descriptionArg = azFileArg(html, 'kodi-test-');
+    const args = createArgs(
+      { organization: 'https://dev.azure.com/acme', project: 'Proj' },
+      'T',
+      azFileArg(html, 'kodi-test-', 'linux'),
+      'To Do',
+    );
+    // The real HTML rides on argv exactly as it always has — no @file indirection,
+    // so the dry-run preview stays readable and re-runnable.
+    expect(args[args.indexOf('--description') + 1]).toBe(html);
+  });
+
+  it('routes it through an @file ref on Windows (the .cmd shim truncates argv)', () => {
+    // Inline, az's Windows `.cmd` shim would cut the value at its first newline —
+    // losing the base64 marker AND the trailing `--output json`.
+    const html = descriptionHtml(stored());
+    const descriptionArg = azFileArg(html, 'kodi-test-', 'win32');
     const args = createArgs(
       { organization: 'https://dev.azure.com/acme', project: 'Proj' },
       'T',
@@ -68,6 +83,37 @@ describe('azure provider — command construction', () => {
     const desc = args[args.indexOf('--description') + 1];
     expect(desc).toBe(descriptionArg);
     expect(desc.startsWith('@')).toBe(true);
+    for (const a of args) expect(a).not.toContain('\n');
+  });
+
+  it('keeps the historical --fields update form off Windows, byte for byte', () => {
+    const html = descriptionHtml(stored());
+    // This is the shape kodi has always sent, and the Windows fix must not touch it.
+    expect(updateArgs('7', html, 'New title', 'linux')).toEqual([
+      'az',
+      'boards',
+      'work-item',
+      'update',
+      '--id',
+      '7',
+      '--fields',
+      `System.Description=${html}`,
+      '--fields',
+      'System.Title=New title',
+    ]);
+    // …and an untitled patch still sends description only.
+    expect(updateArgs('7', html, undefined, 'linux')).not.toContain('--title');
+  });
+
+  it('switches the update to --description @file / --title on Windows', () => {
+    // `--fields System.Description=@file` would NOT expand: az triggers @file only
+    // when the WHOLE argument value starts with `@`, so Windows must use the
+    // dedicated flags to keep the body off argv.
+    const args = updateArgs('7', descriptionHtml(stored()), 'New title', 'win32');
+    expect(args.slice(0, 6)).toEqual(['az', 'boards', 'work-item', 'update', '--id', '7']);
+    expect(args[args.indexOf('--description') + 1].startsWith('@')).toBe(true);
+    expect(args[args.indexOf('--title') + 1]).toBe('New title');
+    expect(args).not.toContain('--fields');
     for (const a of args) expect(a).not.toContain('\n');
   });
 

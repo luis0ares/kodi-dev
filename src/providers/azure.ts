@@ -158,9 +158,10 @@ export function parseWorkItem(
 }
 
 /**
- * `descriptionArg` MUST be an `az` `@<file>` reference (see {@link azFileArg}),
- * never inline HTML: the description is multi-line and an inline value is
- * truncated at its first newline when `az` runs through its Windows `.cmd` shim.
+ * `descriptionArg` comes from {@link azFileArg}: the inline HTML everywhere, an
+ * `@<file>` reference on Windows only — where an inline multi-line value is
+ * truncated at its first newline by az's `.cmd` shim. The flag itself is the same
+ * on every platform, so this builder does not vary.
  */
 export function createArgs(
   coords: { organization?: string; project?: string },
@@ -186,6 +187,37 @@ export function createArgs(
   ];
   if (coords.organization) args.push('--organization', coords.organization);
   if (coords.project) args.push('--project', coords.project);
+  return args;
+}
+
+/**
+ * Args that rewrite a work item's description (and optionally its title) — the
+ * ONE place the Windows fix changes the shape of a command rather than just the
+ * value of an argument, so the two forms are spelled out side by side.
+ *
+ * Non-Windows keeps the historical `--fields System.Description=<html>` form,
+ * byte for byte. Windows cannot: az expands `@file` only when the WHOLE argument
+ * value starts with `@`, and `System.Description=@…` does not, so there is no way
+ * to keep the multi-line body off argv through `--fields`. It therefore uses the
+ * dedicated `--description @file` flag (and `--title`, since a `--fields` title
+ * would have to ride along with the description in the same form).
+ *
+ * `platform` is injectable so both shapes are testable from one machine.
+ */
+export function updateArgs(
+  key: string,
+  html: string,
+  title?: string,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  const args = ['az', 'boards', 'work-item', 'update', '--id', key];
+  if (platform === 'win32') {
+    args.push('--description', azFileArg(html, 'kodi-wi-', platform));
+    if (title) args.push('--title', title);
+    return args;
+  }
+  args.push('--fields', `System.Description=${html}`);
+  if (title) args.push('--fields', `System.Title=${title}`);
   return args;
 }
 
@@ -261,8 +293,8 @@ export class AzureTicketProvider implements TicketProvider {
   async create(input: Ticket): Promise<StoredTicket> {
     const slug = input.slug ?? slugify(input.title);
     const draft: StoredTicket = { ...input, key: '(pending)', slug };
-    // Route the multi-line HTML through an `@file` ref so it is not truncated
-    // at the first newline by az's Windows `.cmd` shim (see azFileArg).
+    // Inline HTML, except on Windows where azFileArg swaps in an `@file` ref
+    // because the `.cmd` shim truncates a multi-line argv value.
     const descriptionArg = azFileArg(descriptionHtml(draft), 'kodi-wi-');
     const res = execMutate(
       createArgs(this.coords(), input.title, descriptionArg, this.stateFor(input.status)),
@@ -350,22 +382,7 @@ export class AzureTicketProvider implements TicketProvider {
     const current = await this.get(key);
     if (!current) throw new Error(`work-item ${key} not found`);
     const merged: StoredTicket = { ...current, ...patch, key, slug: current.slug };
-    // The description is set via `--description @file` (NOT `--fields
-    // System.Description=…`): the `@file` expansion only triggers when the whole
-    // arg value starts with `@`, and it keeps the multi-line body off the argv so
-    // az's Windows `.cmd` shim can't truncate it at the first newline. The title
-    // is single-line, so its dedicated `--title` flag is passed as-is.
-    const args = [
-      'az',
-      'boards',
-      'work-item',
-      'update',
-      '--id',
-      key,
-      '--description',
-      azFileArg(descriptionHtml(merged), 'kodi-wi-'),
-    ];
-    if (patch.title) args.push('--title', patch.title);
+    const args = updateArgs(key, descriptionHtml(merged), patch.title);
     execMutate([...args, ...this.orgArgs()], this.opts.dryRun);
     return merged;
   }

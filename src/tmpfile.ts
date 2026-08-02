@@ -16,24 +16,38 @@ export function writeTempFile(content: string, prefix: string, name: string): st
 }
 
 /**
- * Route a (possibly multi-line) value to `az` through a temp file and return the
- * `@<path>` token az expands — i.e. `--description @<path>` instead of
- * `--description <inline html>`.
+ * How a (possibly multi-line) value reaches `az` — **inline everywhere except
+ * Windows**.
  *
- * WHY (the Windows bug this fixes): on Windows `az` is a `.cmd` shim, and
- * cmd.exe's `%*` argument forwarding TRUNCATES any argv value at its first
- * newline. An inline multi-line `--description` therefore reaches az as only its
- * first line — silently dropping the rest of the body AND every flag that came
- * after it (`--output json`, `--work-items`, …). cross-spawn escapes shell
- * metacharacters but cannot escape a literal newline for a batch file, so the
- * value itself must never carry one. The `@<path>` token is single-line (it
- * survives the shim intact) and az reads the full file content itself, so the
- * complete body round-trips on Windows exactly as it already does on Linux/macOS,
- * where az is a real binary invoked without cmd.exe.
+ * WHY WINDOWS NEEDS ANYTHING ELSE: there `az` is a `.cmd` shim, and cmd.exe's
+ * `%*` argument forwarding TRUNCATES any argv value at its first newline. An
+ * inline multi-line `--description` reaches az as only its first line — silently
+ * dropping the rest of the body AND every flag that came after it (`--output
+ * json`, `--work-items`, …). cross-spawn escapes shell metacharacters but cannot
+ * escape a literal newline for a batch file, so on Windows the value itself must
+ * never carry one: the body goes to a temp file and az gets the single-line
+ * `@<path>` token, which it expands by reading the file.
  *
- * az treats a leading `@` as "read from file"; since we prefix the PATH (never the
- * content), a body that itself begins with `@` is unaffected.
+ * WHY EVERY OTHER PLATFORM KEEPS THE INLINE VALUE: on Linux/macOS `az` is a real
+ * binary invoked without cmd.exe, so the multi-line argv value already arrives
+ * intact — there is no bug to fix. Routing it through a file anyway would change
+ * behaviour that works: it would leave a temp file behind on every description
+ * write, and turn kodi's dry-run preview into `--description @/tmp/…/body.html`,
+ * a command the user can no longer read or re-run once the temp file is gone.
+ * So the fix is scoped to the platform that has the defect, and non-Windows argv
+ * stays byte-for-byte what it has always been.
+ *
+ * `platform` is injectable so both shapes are testable from one machine.
+ *
+ * az treats a leading `@` as "read from file"; the prefix goes on the PATH, never
+ * the content, so a body that itself begins with `@` is unaffected — and on
+ * non-Windows the value is passed through untouched, exactly as before.
  */
-export function azFileArg(content: string, prefix: string): string {
+export function azFileArg(
+  content: string,
+  prefix: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform !== 'win32') return content;
   return `@${writeTempFile(content, prefix, 'body.html')}`;
 }

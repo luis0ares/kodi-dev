@@ -268,12 +268,23 @@ describe('pr command construction', () => {
     expect(args).not.toContain('--repository');
   });
 
-  it('routes the multi-line azure PR description through an @file ref (Windows .cmd shim safety)', () => {
-    // A real, multi-line HTML body — the shape that az's Windows `.cmd` shim would
-    // truncate at the first newline if passed inline.
+  it('keeps the azure PR description inline off Windows (unchanged behaviour)', () => {
     const html = renderPrHtml(draft());
     expect(html).toContain('\n'); // precondition: the body really is multi-line
-    const descriptionArg = azFileArg(html, 'kodi-test-');
+    const inline = azFileArg(html, 'kodi-test-', 'linux');
+    expect(inline).toBe(html);
+    for (const args of [
+      azureCreateArgs(draft(), inline, 'feat/x', 'main', 'Repo'),
+      azureUpdateArgs('42', draft(), inline),
+    ]) {
+      expect(args[args.indexOf('--description') + 1]).toBe(html);
+    }
+  });
+
+  it('routes the multi-line azure PR description through an @file ref on Windows', () => {
+    // Inline, az's `.cmd` shim truncates the body at its first newline and drops
+    // every flag after it (`--work-items`, `--repository`).
+    const descriptionArg = azFileArg(renderPrHtml(draft()), 'kodi-test-', 'win32');
 
     for (const args of [
       azureCreateArgs(draft(), descriptionArg, 'feat/x', 'main', 'Repo'),
