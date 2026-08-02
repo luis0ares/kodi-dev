@@ -1,6 +1,7 @@
 import type { ColumnMap } from '../config.js';
 import { execRead, execMutate } from '../exec.js';
 import { mdToHtml } from '../html.js';
+import { azFileArg } from '../tmpfile.js';
 import {
   renderTicketMarkdown,
   slugify,
@@ -172,10 +173,16 @@ export function parseWorkItem(
   };
 }
 
+/**
+ * `descriptionArg` comes from {@link azFileArg}: the inline HTML everywhere, an
+ * `@<file>` reference on Windows only — where an inline multi-line value is
+ * truncated at its first newline by az's `.cmd` shim. The flag itself is the same
+ * on every platform, so this builder does not vary.
+ */
 export function createArgs(
   coords: { organization?: string; project?: string },
   title: string,
-  html: string,
+  descriptionArg: string,
   state: string,
 ): string[] {
   const args = [
@@ -190,12 +197,43 @@ export function createArgs(
     '--fields',
     `System.State=${state}`,
     '--description',
-    html,
+    descriptionArg,
     '--output',
     'json',
   ];
   if (coords.organization) args.push('--organization', coords.organization);
   if (coords.project) args.push('--project', coords.project);
+  return args;
+}
+
+/**
+ * Args that rewrite a work item's description (and optionally its title) — the
+ * ONE place the Windows fix changes the shape of a command rather than just the
+ * value of an argument, so the two forms are spelled out side by side.
+ *
+ * Non-Windows keeps the historical `--fields System.Description=<html>` form,
+ * byte for byte. Windows cannot: az expands `@file` only when the WHOLE argument
+ * value starts with `@`, and `System.Description=@…` does not, so there is no way
+ * to keep the multi-line body off argv through `--fields`. It therefore uses the
+ * dedicated `--description @file` flag (and `--title`, since a `--fields` title
+ * would have to ride along with the description in the same form).
+ *
+ * `platform` is injectable so both shapes are testable from one machine.
+ */
+export function updateArgs(
+  key: string,
+  html: string,
+  title?: string,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  const args = ['az', 'boards', 'work-item', 'update', '--id', key];
+  if (platform === 'win32') {
+    args.push('--description', azFileArg(html, 'kodi-wi-', platform));
+    if (title) args.push('--title', title);
+    return args;
+  }
+  args.push('--fields', `System.Description=${html}`);
+  if (title) args.push('--fields', `System.Title=${title}`);
   return args;
 }
 
@@ -271,9 +309,11 @@ export class AzureTicketProvider implements TicketProvider {
   async create(input: Ticket): Promise<StoredTicket> {
     const slug = input.slug ?? slugify(input.title);
     const draft: StoredTicket = { ...input, key: '(pending)', slug };
-    const html = descriptionHtml(draft);
+    // Inline HTML, except on Windows where azFileArg swaps in an `@file` ref
+    // because the `.cmd` shim truncates a multi-line argv value.
+    const descriptionArg = azFileArg(descriptionHtml(draft), 'kodi-wi-');
     const res = execMutate(
-      createArgs(this.coords(), input.title, html, this.stateFor(input.status)),
+      createArgs(this.coords(), input.title, descriptionArg, this.stateFor(input.status)),
       this.opts.dryRun,
     );
     if (!res.ran) return { ...draft, key: '(dry-run)' };
@@ -357,10 +397,7 @@ export class AzureTicketProvider implements TicketProvider {
     const current = await this.get(key);
     if (!current) throw new Error(`work-item ${key} not found`);
     const merged: StoredTicket = { ...current, ...patch, key, slug: current.slug };
-    const fields = [`System.Description=${descriptionHtml(merged)}`];
-    if (patch.title) fields.push(`System.Title=${patch.title}`);
-    const args = ['az', 'boards', 'work-item', 'update', '--id', key];
-    for (const f of fields) args.push('--fields', f);
+    const args = updateArgs(key, descriptionHtml(merged), patch.title);
     execMutate([...args, ...this.orgArgs()], this.opts.dryRun);
     return merged;
   }

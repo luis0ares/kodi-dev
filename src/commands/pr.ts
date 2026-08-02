@@ -1,10 +1,9 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import { ZodError } from 'zod';
 import { loadBoardConfig } from '../config.js';
 import { execMutate, execRead } from '../exec.js';
+import { azFileArg, writeTempFile } from '../tmpfile.js';
 import {
   assertWithinBodyLimit,
   PrSchema,
@@ -122,9 +121,14 @@ export function azureWorkItemIds(relatedIssues: string[]): string[] {
   return ids;
 }
 
+/**
+ * `descriptionArg` comes from {@link azFileArg}: the inline HTML body everywhere,
+ * an `@<file>` reference on Windows only — where a multi-line inline
+ * `--description` is truncated at its first newline by az's `.cmd` shim.
+ */
 export function azureCreateArgs(
   pr: Pr,
-  html: string,
+  descriptionArg: string,
   source: string,
   target: string,
   repo?: string,
@@ -138,7 +142,7 @@ export function azureCreateArgs(
     '--title',
     pr.title,
     '--description',
-    html,
+    descriptionArg,
     '--source-branch',
     source,
     '--target-branch',
@@ -163,9 +167,22 @@ export function githubEditArgs(id: string, pr: Pr, bodyFile: string, repo?: stri
   return args;
 }
 
-export function azureUpdateArgs(id: string, pr: Pr, html: string): string[] {
+/** `descriptionArg` comes from {@link azFileArg} — inline HTML everywhere, an
+ * `@<file>` reference on Windows, whose `.cmd` shim truncates a multi-line value. */
+export function azureUpdateArgs(id: string, pr: Pr, descriptionArg: string): string[] {
   // az repos pr update identifies the PR by --id alone (no --repository needed).
-  return ['az', 'repos', 'pr', 'update', '--id', id, '--title', pr.title, '--description', html];
+  return [
+    'az',
+    'repos',
+    'pr',
+    'update',
+    '--id',
+    id,
+    '--title',
+    pr.title,
+    '--description',
+    descriptionArg,
+  ];
 }
 
 /** Attach the shared template-draft options used by both `create` and `edit`,
@@ -233,11 +250,13 @@ export function registerPrCommand(program: Command) {
       assertWithinBodyLimit(body);
       let args: string[];
       if (provider === 'github') {
-        const bodyFile = join(mkdtempSync(join(tmpdir(), 'kodi-pr-')), 'body.md');
-        writeFileSync(bodyFile, body, 'utf-8');
+        const bodyFile = writeTempFile(body, 'kodi-pr-', 'body.md');
         args = githubCreateArgs(draft, bodyFile, o.source, targetBranch, repo, o.draft);
       } else {
-        args = azureCreateArgs(draft, renderPrHtml(draft), o.source, targetBranch, repo, o.draft);
+        // On Windows this becomes an `@file` ref (the `.cmd` shim truncates a
+        // multi-line value); everywhere else it stays the inline HTML body.
+        const descriptionArg = azFileArg(renderPrHtml(draft), 'kodi-pr-');
+        args = azureCreateArgs(draft, descriptionArg, o.source, targetBranch, repo, o.draft);
       }
       const res = execMutate(args, !o.yes);
       if (res.ran)
@@ -260,11 +279,12 @@ export function registerPrCommand(program: Command) {
       assertWithinBodyLimit(body);
       let args: string[];
       if (target === 'github') {
-        const bodyFile = join(mkdtempSync(join(tmpdir(), 'kodi-pr-')), 'body.md');
-        writeFileSync(bodyFile, body, 'utf-8');
+        const bodyFile = writeTempFile(body, 'kodi-pr-', 'body.md');
         args = githubEditArgs(id, draft, bodyFile, repo);
       } else {
-        args = azureUpdateArgs(id, draft, renderPrHtml(draft));
+        // On Windows this becomes an `@file` ref (the `.cmd` shim truncates a
+        // multi-line value); everywhere else it stays the inline HTML body.
+        args = azureUpdateArgs(id, draft, azFileArg(renderPrHtml(draft), 'kodi-pr-'));
       }
       const res = execMutate(args, !o.yes);
       if (res.ran) process.stdout.write((res.stdout.trim() || 'PR updated') + '\n');

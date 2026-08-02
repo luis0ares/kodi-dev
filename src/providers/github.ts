@@ -1,8 +1,6 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { ColumnMap } from '../config.js';
 import { execMutate, execRead } from '../exec.js';
+import { writeTempFile } from '../tmpfile.js';
 import {
   renderTicketMarkdown,
   slugify,
@@ -356,7 +354,5 @@ function toRef(t: StoredTicket): TicketRef {
 
 /** Write an issue body to a temp file (gh reads --body-file). */
 function writeTempBody(body: string): string {
-  const file = join(mkdtempSync(join(tmpdir(), 'kodi-gh-')), 'body.md');
-  writeFileSync(file, body, 'utf-8');
-  return file;
+  return writeTempFile(body, 'kodi-gh-', 'body.md');
 }
