@@ -22,8 +22,8 @@ description: >-
 
   Do NOT use this agent to pick colors/typography (brand), define the component
   library (component-engineer), or write frontend code.
-color: magenta
 model: opus
+color: magenta
 tools: Read, Grep, Glob, WebSearch, WebFetch
 ---
 

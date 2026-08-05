@@ -21,8 +21,8 @@ description: >-
 
   Do NOT use this agent to build feature pages, fetch data, or set brand direction
   (brand). The frontend-engineer executes this spec.
-color: magenta
 model: opus
+color: magenta
 tools: Read, Write, Grep, Glob
 ---
 

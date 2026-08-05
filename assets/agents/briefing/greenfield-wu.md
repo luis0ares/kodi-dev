@@ -23,8 +23,8 @@ description: >-
   Do NOT use this agent to interview the human, to decide scope, or on a project that
   already has a codebase (use brownfield-wu there). If there is no seed material and
   no domain to research, SKIP it entirely.
-color: cyan
 model: opus
+color: cyan
 tools: Read, Grep, Glob, WebSearch, WebFetch
 ---
 

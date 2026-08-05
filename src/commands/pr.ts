@@ -202,13 +202,6 @@ function addTemplateOptions(cmd: Command): Command {
     .option('--fix <text>', 'Included Changes › fix (repeatable)', collect, [])
     .option('--improvement <text>', 'Included Changes › improvement (repeatable)', collect, [])
     .option(
-      '--vulnerability <ref>',
-      'security finding to capture into project memory, referencing its report ' +
-        '(repeatable; captured by the hook, not rendered in the PR body)',
-      collect,
-      [],
-    )
-    .option(
       '--testing <kind>',
       'Testing checkbox: unit|integration|manual|na (repeatable)',
       collect,

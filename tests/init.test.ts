@@ -9,15 +9,11 @@ import {
   installHarness,
   mergeEnv,
   mergePermissions,
-  mergePostToolUseHook,
   mergeSessionStartHook,
-  mergeUserPromptSubmitHook,
   PERMISSION_ALLOW,
   PERMISSION_DENY,
   writeState,
 } from '../src/commands/init.js';
-import { openDb } from '../src/memory/db.js';
-import { provisionCollection } from '../src/memory/store.js';
 import type { Prompter } from '../src/prompt.js';
 import { normalizeOrgUrl, type Runner } from '../src/providers/azure-discovery.js';
 
@@ -143,30 +139,6 @@ describe('SessionStart hook merge', () => {
   });
 });
 
-describe('UserPromptSubmit hook merge', () => {
-  it('adds the memory-injection hook, is idempotent, and has no matcher', () => {
-    const settings: Record<string, any> = {};
-    expect(mergeUserPromptSubmitHook(settings)).toBe(true);
-    expect(mergeUserPromptSubmitHook(settings)).toBe(false);
-    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
-    expect(settings.hooks.UserPromptSubmit[0].matcher).toBeUndefined();
-    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe(
-      'kodi hook user-prompt-submit',
-    );
-  });
-});
-
-describe('PostToolUse hook merge', () => {
-  it('adds the hook with a Bash|Write|Edit matcher and is idempotent', () => {
-    const settings: Record<string, any> = {};
-    expect(mergePostToolUseHook(settings)).toBe(true);
-    expect(mergePostToolUseHook(settings)).toBe(false);
-    expect(settings.hooks.PostToolUse).toHaveLength(1);
-    expect(settings.hooks.PostToolUse[0].matcher).toBe('Bash|Write|Edit');
-    expect(settings.hooks.PostToolUse[0].hooks[0].command).toBe('kodi hook post-tool-use');
-  });
-});
-
 describe('permissions merge', () => {
   it('adds the deny/allow defaults, is idempotent, and preserves existing rules', () => {
     const settings: Record<string, any> = { permissions: { deny: ['Bash(rm:*)'], allow: [] } };
@@ -269,12 +241,8 @@ describe('installHarness (files only)', () => {
     expect(settings.permissions.allow).toEqual(expect.arrayContaining(PERMISSION_ALLOW));
     // the sub-agent spawn-depth env default is written
     expect(settings.env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH).toBe('5');
-    // all three memory hooks are wired
+    // the SessionStart hook is wired
     expect(settings.hooks.SessionStart[0].hooks[0].command).toBe('kodi hook session-start');
-    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe(
-      'kodi hook user-prompt-submit',
-    );
-    expect(settings.hooks.PostToolUse[0].hooks[0].command).toBe('kodi hook post-tool-use');
     for (const a of ['brief', 'architect', 'build-orchestrator']) {
       expect(existsSync(join(dir, '.claude/agents', `${a}.md`))).toBe(true);
     }
@@ -621,16 +589,5 @@ describe('writeState', () => {
     expect(p).toContain('.claude/kodi-dev.yaml');
     const yaml = readFileSync(p, 'utf-8');
     expect(yaml).toContain('provider: local');
-  });
-
-  it('provisions a memory collection and binds it in the state file (as init does)', () => {
-    const db = openDb(join(dir, 'rag.db'));
-    const col = provisionCollection(db, dir, 'demo');
-    db.close();
-    const p = writeState(dir, { provider: 'local', prefix: 'KODI', memory: col });
-    const yaml = readFileSync(p, 'utf-8');
-    expect(yaml).toContain('memory:');
-    expect(yaml).toContain(col.collection);
-    expect(col.collection).toMatch(/^demo-[0-9a-f]{6}$/);
   });
 });

@@ -22,8 +22,8 @@ description: >-
 
   Do NOT use this agent to do the research, brand or design-system work directly, to
   spawn sub-agents, or to design the backend architecture.
-color: magenta
 model: opus
+color: magenta
 tools: Read, Grep, Glob
 ---
 

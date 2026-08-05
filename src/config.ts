@@ -1,19 +1,10 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { parse as parseYaml } from 'yaml';
 import { slugForStatus } from './providers/status-index.js';
 import type { TicketStatus } from './templates/ticket.js';
 
 export type ProviderName = 'local' | 'github' | 'azure';
-
-/** A project's memory-store binding, written by `kodi init` (or auto-provisioned). */
-export interface MemoryBinding {
-  /** Stable collection id (DB key), e.g. "myapp-a1b2c3". */
-  collection: string;
-  /** Human display name, e.g. "myapp". */
-  name: string;
-}
 
 /**
  * The board column mapping — a display column name per logical status. For Azure
@@ -62,23 +53,6 @@ export interface BoardConfig {
    * azure providers. `--target` on the command overrides it.
    */
   prTarget?: string;
-  /** Memory-store collection binding for this project (see `kodi memory`). */
-  memory?: MemoryBinding;
-}
-
-/**
- * The kodi home directory — where the machine-global memory store lives, OUTSIDE
- * any project so knowledge survives and spans repos. `$KODI_HOME` overrides the
- * default `~/.kodi`. Not the npm install dir (that is wiped on upgrade).
- */
-export function kodiHome(): string {
-  const override = process.env.KODI_HOME?.trim();
-  return override && override.length > 0 ? override : join(homedir(), '.kodi');
-}
-
-/** Absolute path to the single shared memory database (all projects, partitioned by collection). */
-export function ragDbPath(): string {
-  return join(kodiHome(), 'rag.db');
 }
 
 const DEFAULTS: BoardConfig = { provider: 'local', prefix: 'KODI' };
@@ -119,25 +93,6 @@ export function loadBoardConfig(cwd = process.cwd()): BoardConfig {
   } catch {
     return { ...DEFAULTS };
   }
-}
-
-/**
- * Persist a project's memory binding into its `.claude/kodi-dev.yaml`. Only patches
- * an EXISTING state file (a project that ran `kodi init`); when none exists the
- * global DB's `root_path` registry is the source of truth, so we leave the disk
- * untouched rather than materialize a config the user never asked for.
- */
-export function writeMemoryBinding(root: string, memory: MemoryBinding): void {
-  const path = stateFilePath(root);
-  if (!existsSync(path)) return;
-  let raw: Record<string, unknown> = {};
-  try {
-    raw = (parseYaml(readFileSync(path, 'utf-8')) as Record<string, unknown>) ?? {};
-  } catch {
-    raw = {};
-  }
-  raw.memory = memory;
-  writeFileSync(path, stringifyYaml(raw), 'utf-8');
 }
 
 /**

@@ -7,13 +7,11 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { stringify as stringifyYaml } from 'yaml';
 import { stateFilePath, type BoardConfig } from '../config.js';
-import { openDb } from '../memory/db.js';
-import { provisionCollection } from '../memory/store.js';
 import { DEFAULT_COLUMNS } from '../providers/azure.js';
 import {
   getProjectInfo,
@@ -40,8 +38,6 @@ import { readlinePrompter, type Prompter } from '../prompt.js';
 
 const HOOK_COMMAND = 'kodi hook session-start';
 const SESSION_MATCHER = 'startup|resume|clear|compact';
-const UPS_COMMAND = 'kodi hook user-prompt-submit';
-const PTU_COMMAND = 'kodi hook post-tool-use';
 
 interface HookEntry {
   matcher?: string;
@@ -71,23 +67,6 @@ function addHookOnce(
 /** Idempotently merge the kodi SessionStart hook into a settings.json object. */
 export function mergeSessionStartHook(settings: Record<string, any>): boolean {
   return addHookOnce(settings, 'SessionStart', HOOK_COMMAND, SESSION_MATCHER);
-}
-
-/**
- * Idempotently merge the kodi UserPromptSubmit hook, which injects memories relevant
- * to each prompt (pure FTS, no LLM). No matcher — UserPromptSubmit is not a tool event.
- */
-export function mergeUserPromptSubmitHook(settings: Record<string, any>): boolean {
-  return addHookOnce(settings, 'UserPromptSubmit', UPS_COMMAND);
-}
-
-/**
- * Idempotently merge the kodi PostToolUse hook (matcher `Bash`), which deterministically
- * captures durable artifacts from kodi commands (e.g. security findings on a
- * `kodi pr create`) into memory — no LLM, pure side effect.
- */
-export function mergePostToolUseHook(settings: Record<string, any>): boolean {
-  return addHookOnce(settings, 'PostToolUse', PTU_COMMAND, 'Bash|Write|Edit');
 }
 
 /**
@@ -261,16 +240,12 @@ export function installHarness(root: string, opts: InstallOptions = {}): string[
     ? JSON.parse(readFileSync(settingsPath, 'utf-8'))
     : {};
   const hookChanged = mergeSessionStartHook(settings);
-  const upsChanged = mergeUserPromptSubmitHook(settings);
-  const ptuChanged = mergePostToolUseHook(settings);
   const permsChanged = mergePermissions(settings);
   const envChanged = mergeEnv(settings);
-  if (hookChanged || upsChanged || ptuChanged || permsChanged || envChanged) {
+  if (hookChanged || permsChanged || envChanged) {
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
     const parts = [
       hookChanged ? 'SessionStart hook' : null,
-      upsChanged ? 'UserPromptSubmit hook' : null,
-      ptuChanged ? 'PostToolUse hook' : null,
       permsChanged ? 'permissions' : null,
       envChanged ? 'env' : null,
     ]
@@ -732,20 +707,6 @@ export function registerInitCommand(program: Command) {
       }
 
       const changed = installHarness(root, { force: o.force, provider: config.provider });
-
-      // Provision this project's memory collection (best-effort — never block init)
-      // and bind it in the state file so `kodi memory` and the SessionStart digest
-      // scope to it. Keyed by the ABSOLUTE root so it matches later `findProjectRoot`.
-      try {
-        const db = openDb();
-        const displayName =
-          config.project ??
-          (config.repository ? basename(config.repository) : basename(resolve(root)));
-        config.memory = provisionCollection(db, resolve(root), displayName);
-        db.close();
-      } catch {
-        /* memory is optional; a failure here must not abort init */
-      }
 
       const statePath = writeState(root, config);
       process.stdout.write(

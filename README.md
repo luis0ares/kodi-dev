@@ -6,10 +6,6 @@ plus a deterministic CLI that proxies your **ticket board** and **pull requests*
 **inside** a Claude Code session: you drive the phases, the agents do the work, and the CLI
 is the only thing that touches your board or opens a PR.
 
-> [!NOTE]
-> New in **1.2.0** — a per-project **memory knowledge database**. See
-> [Memory (1.2.0)](#memory-120).
-
 ---
 
 ## Quick start
@@ -198,31 +194,6 @@ kodi pr abandon <id>
 ```bash
 kodi add ./packs/fastapi-backend    # install a skill-pack (skills + CLAUDE.md fragment)
 ```
-
-### Memory (1.2.0)
-
-`kodi init` gives every project a **cross-session memory knowledge database** — a lexical
-(BM25 full-text) store the whole team of agents reads and writes, so learnings about the
-repo outlive the session instead of being re-derived. It lives outside your tree
-(`$KODI_HOME`, default `~/.kodi`), partitioned per project, so memories never leak between
-repos.
-
-Each memory is linked to source **file(s)** and carries a **veracity score (0–5)**: trust
-is *earned by surviving changes* to those files and *lost by being refuted*. When a linked
-file changes, its memories are auto-flagged `⚠reverify`; the next agent to rely on one
-reads the file, then records the outcome — a self-correcting trust loop.
-
-```bash
-kodi memory store --type decision --content "why X, not Y" --file src/foo.ts --ticket KODI-014
-kodi memory query "auth flow" --json          # search, scoped to this project
-kodi memory list                              # browse recent memories
-kodi memory verify <id> --pass                # still true → raise the score
-kodi memory verify <id> --fail --reason "…"   # refuted → tombstone it
-kodi memory export --type decision            # / import <path>
-```
-
-From inside a session, the **`/remember`** skill wraps the same store — "remember this",
-"what do we already know about X".
 
 ---
 

@@ -22,8 +22,8 @@ description: >-
 
   Do NOT use this agent to write migrations, ORM models, or repositories (that is
   backend-engineer, which implements this spec), or to design UX.
-color: blue
 model: opus
+color: blue
 tools: Read, Write, Grep, Glob
 ---
 

@@ -23,8 +23,8 @@ description: >-
 
   Do NOT use this agent to author ADRs or data models directly, to spawn sub-agents,
   or to design UX. It plans and validates architecture work only.
-color: blue
 model: opus
+color: blue
 tools: Read, Grep, Glob
 ---
 

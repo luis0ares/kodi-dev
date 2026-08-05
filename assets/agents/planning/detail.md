@@ -21,8 +21,8 @@ description: >-
 
   Do NOT use this agent to choose a stack, design data models or UX, split phases, or
   write tickets — those are other Planning agents / phases.
-color: green
 model: opus
+color: green
 tools: Read, Write, Grep, Glob
 ---
 

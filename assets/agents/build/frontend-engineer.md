@@ -21,8 +21,8 @@ description: >-
 
   Do NOT use this agent for backend/use-case work, to define the design system (that
   is component-engineer, whose spec it consumes), or to author the test suite.
-color: green
 model: sonnet
+color: green
 tools: Read, Write, Edit, Grep, Glob, Bash
 ---
 
@@ -38,6 +38,37 @@ skill-packs — read them first.
   deviate, STOP and surface it rather than diverging silently.
 - **Feature UI, not tests.** The suite is the testers' job.
 - **Respect the gate.** Write to pass the project's frontend gate commands.
+
+## Context economy (read this before anything else)
+
+The build-orchestrator hands you a **Slice Brief** in your spawn prompt: the goal and
+acceptance criteria, the stack, the binding rules, the exact files to touch, the
+pattern to copy, and the scoped commands to run.
+
+- **Trust the brief. Do NOT re-derive it.** Do not re-read `CLAUDE.md`, the PRD, the
+  ADRs, or the plan docs to rebuild context the brief already gives you, and do not
+  explore the repo to rediscover the touch points. That re-derivation, repeated by
+  every agent in the slice, is the single biggest token waste in a build.
+- **Read narrowly.** Open the files the brief names plus the one pattern file it
+  points to. Prefer a specific `Grep` over reading a file whole; use `Read` with
+  `offset`/`limit` on large files.
+- **If the brief is wrong or silent on something you need, say so and ask** rather
+  than spelunking. One corrected brief is cheaper than every agent exploring alone.
+
+## Command economy
+
+- **Run the scoped commands from the brief.** Do NOT run `make gate-backend`,
+  `make gate-frontend`, or `make gate-e2e*`. Those re-sync dependencies and run the
+  entire suite; the full gate belongs to `qa-implementation` and runs once per slice.
+- **Keep command output small — output is context you pay for.** Run pytest with `-q`
+  and **without** coverage while iterating (`--cov-report=term-missing` prints a table
+  of every uncovered line in the codebase). Pipe noisy commands through
+  `2>&1 | tail -n 40`.
+- **Regression over full suite.** After implementing, verify with a scoped regression
+  over the areas you touched — never the whole suite. If it goes red, **report it and
+  stop**; do not press on, and do not widen the test run hunting for context.
+- **When something fails, quote only the failing assertion and its traceback** in your
+  output, never the whole log.
 
 ## Process
 

@@ -21,8 +21,8 @@ description: >-
 
   Do NOT use this agent to validate traceability (qa-planning), author the PRD/
   architecture, or create board tickets (that is /tickets).
-color: yellow
 model: opus
+color: yellow
 tools: Read, Write, Grep, Glob
 ---
 

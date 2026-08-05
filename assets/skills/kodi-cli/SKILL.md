@@ -125,9 +125,6 @@ kodi pr create \
   (`gh pr create --draft`, `az repos pr create --draft true`).
 - **`--file <path>`** supplies the whole draft as JSON instead of flags — the
   ergonomic way to specify the nested checkbox groups.
-- **`--vulnerability "<severity> — <what> (<report-path>)"`** (repeatable) does NOT
-  appear in the PR body; the hook captures each as a project-memory `gotcha` for
-  follow-up. Use it to record security findings surfaced by the slice.
 - Reference syntax that auto-links on merge: GitHub `Closes #<id>` / `Refs #<id>`,
   Azure DevOps `AB#<id>`.
 
