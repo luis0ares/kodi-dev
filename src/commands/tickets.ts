@@ -197,7 +197,9 @@ export function registerTicketsCommand(program: Command) {
 
   tickets
     .command('start <key>')
-    .description('Mark a ticket started (In progress)')
+    .description(
+      'Mark a ticket started (In progress), assigned to you (github/azure; local has no assignee)',
+    )
     .option('--branch <name>')
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assignSelfArgs,
   columnForStatus,
   createIssueArgs,
   DEFAULT_COLUMNS,
@@ -131,6 +132,21 @@ describe('github provider — command construction', () => {
       '--single-select-option-id',
       'opt_4',
     ]);
+  });
+
+  it('builds the self-assign args with @me (no login lookup needed)', () => {
+    expect(assignSelfArgs('7', 'acme/app')).toEqual([
+      'gh',
+      'issue',
+      'edit',
+      '7',
+      '--add-assignee',
+      '@me',
+      '--repo',
+      'acme/app',
+    ]);
+    // no repo configured → the flag is simply omitted, same as elsewhere in the file.
+    expect(assignSelfArgs('7')).not.toContain('--repo');
   });
 });
 

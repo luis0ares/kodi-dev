@@ -73,7 +73,7 @@ kodi tickets deps KODI-003 --add KODI-001 --add KODI-002 --yes   # declare deps
 
 ```bash
 kodi tickets set-status KODI-003 "In progress" --yes
-kodi tickets start KODI-003 --branch feat/csv-import --yes   # → In progress (+ branch)
+kodi tickets start KODI-003 --branch feat/csv-import --yes   # → In progress (+ branch, assigns you)
 kodi tickets amend KODI-003 -s "New summary" --ac "New AC" --notes "…" --yes
 kodi tickets link-pr KODI-003 <pr-url-or-id> --yes
 kodi tickets hand-off KODI-003 --pr <pr-url-or-id> --yes     # → To review, links the PR

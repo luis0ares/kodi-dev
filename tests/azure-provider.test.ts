@@ -8,7 +8,9 @@ import {
   descriptionHtml,
   kanbanColumnField,
   listWiql,
+  moveFields,
   parseQueryOutput,
+  parseSignedInUser,
   parseWorkItem,
   stateForColumn,
   updateArgs,
@@ -189,6 +191,33 @@ describe('azure provider — command construction', () => {
     expect(kanbanColumnField({ 'System.BoardColumn': 'Doing' })).toBeUndefined();
     // a not-yet-placed card (no WEF field) yields undefined → move falls back to state-only
     expect(kanbanColumnField({ 'System.State': 'To Do' })).toBeUndefined();
+  });
+
+  it('builds the move fields: state, kanban column, and (when given) the assignee', () => {
+    const cols = { todo: 'To Do', inProgress: 'Doing', toReview: 'Review', done: 'Done' };
+    const map = { Doing: 'InProgressState' };
+    expect(moveFields('In progress', cols, map)).toEqual(['System.State=InProgressState']);
+    expect(moveFields('In progress', cols, map, 'WEF_x_Kanban.Column')).toEqual([
+      'System.State=InProgressState',
+      'WEF_x_Kanban.Column=Doing',
+    ]);
+    // `start` adds System.AssignedTo — a plain move never sends it (assignedTo omitted).
+    expect(moveFields('In progress', cols, map, 'WEF_x_Kanban.Column', 'dev@acme.com')).toEqual([
+      'System.State=InProgressState',
+      'WEF_x_Kanban.Column=Doing',
+      'System.AssignedTo=dev@acme.com',
+    ]);
+  });
+
+  it('resolves the signed-in user for System.AssignedTo, preferring mail over UPN', () => {
+    expect(parseSignedInUser(JSON.stringify({ mail: 'dev@acme.com' }))).toBe('dev@acme.com');
+    // some accounts (guest/service) have no `mail` — fall back to the UPN.
+    expect(
+      parseSignedInUser(
+        JSON.stringify({ mail: null, userPrincipalName: 'dev_gmail.com#EXT#@acme.onmicrosoft.com' }),
+      ),
+    ).toBe('dev_gmail.com#EXT#@acme.onmicrosoft.com');
+    expect(parseSignedInUser(JSON.stringify({}))).toBe('');
   });
 });
 

@@ -149,6 +149,16 @@ export function itemAddArgs(owner: string, number: number, issueUrl: string): st
   ];
 }
 
+/**
+ * Assign the authenticated `gh` user to an issue. `@me` is `gh`'s own literal for
+ * "whoever is logged in" — no separate lookup of the user's login is needed.
+ */
+export function assignSelfArgs(key: string, repo?: string): string[] {
+  const args = ['gh', 'issue', 'edit', key, '--add-assignee', '@me'];
+  if (repo) args.push('--repo', repo);
+  return args;
+}
+
 export function itemEditArgs(
   projectId: string,
   itemId: string,
@@ -323,7 +333,11 @@ export class GithubTicketProvider implements TicketProvider {
   }
 
   async start(key: string, _p: StartProvenance): Promise<StoredTicket> {
-    return this.setStatus(key, 'In progress');
+    const t = await this.setStatus(key, 'In progress');
+    // Assign the issue to whoever is running `start`, so it doesn't land on the
+    // board unowned.
+    execMutate(assignSelfArgs(key, this.opts.repo), this.opts.dryRun);
+    return t;
   }
 
   async amend(key: string, patch: Partial<Ticket>): Promise<StoredTicket> {

@@ -129,6 +129,16 @@ export function stateForColumn(column: string, columnStates?: Record<string, str
   return columnStates?.[column] ?? column;
 }
 
+/**
+ * Parse `az ad signed-in-user show --output json` into an identity `System.AssignedTo`
+ * accepts. Prefers `mail`; falls back to the UPN for accounts with no mail attribute
+ * (some guest/service accounts). Empty when neither is present.
+ */
+export function parseSignedInUser(json: string): string {
+  const d = JSON.parse(json);
+  return (d?.mail || d?.userPrincipalName || '').trim();
+}
+
 /** Inverse mapping: a board column back to a ticket status. */
 export function statusFromColumn(column: string, cols: ColumnMap): TicketStatus | undefined {
   if (column === cols.todo) return 'Pending';
@@ -220,6 +230,26 @@ export function createArgs(
  *
  * `platform` is injectable so both shapes are testable from one machine.
  */
+/**
+ * The `--fields` entries a board move writes: the state a column maps to, the
+ * hidden Kanban column field when the card is already placed, and, when given, the
+ * `System.AssignedTo` identity — `start` uses this last one to assign the ticket to
+ * whoever is running it. Exported for testing; used by {@link AzureTicketProvider}.
+ */
+export function moveFields(
+  status: TicketStatus,
+  cols: ColumnMap,
+  columnStates: Record<string, string> | undefined,
+  kanbanField?: string,
+  assignedTo?: string,
+): string[] {
+  const column = columnForStatus(status, cols);
+  const fields = [`System.State=${stateForColumn(column, columnStates)}`];
+  if (kanbanField) fields.push(`${kanbanField}=${column}`);
+  if (assignedTo) fields.push(`System.AssignedTo=${assignedTo}`);
+  return fields;
+}
+
 export function updateArgs(
   key: string,
   html: string,
@@ -277,13 +307,30 @@ export class AzureTicketProvider implements TicketProvider {
    * Kanban field is absent (a not-yet-placed item) the state write alone still
    * moves it, and Azure places it in the default column for that state.
    */
-  private moveArgs(id: string, status: TicketStatus, kanbanField?: string): string[] {
-    const column = columnForStatus(status, this.columns);
-    const fields = [`System.State=${stateForColumn(column, this.columnStates)}`];
-    if (kanbanField) fields.push(`${kanbanField}=${column}`);
+  private moveArgs(
+    id: string,
+    status: TicketStatus,
+    kanbanField?: string,
+    assignedTo?: string,
+  ): string[] {
     const args = ['az', 'boards', 'work-item', 'update', '--id', id];
-    for (const f of fields) args.push('--fields', f);
+    for (const f of moveFields(status, this.columns, this.columnStates, kanbanField, assignedTo)) {
+      args.push('--fields', f);
+    }
     return [...args, ...this.orgArgs()];
+  }
+
+  /**
+   * The signed-in `az` user's identity, for `System.AssignedTo` on `start`. Best-
+   * effort: returns '' (skip assignment) when the lookup fails — e.g. a
+   * service-principal login has no interactive user to assign to.
+   */
+  private signedInUser(): string {
+    try {
+      return parseSignedInUser(execRead(['az', 'ad', 'signed-in-user', 'show', '--output', 'json']));
+    } catch {
+      return '';
+    }
   }
 
   private coords() {
@@ -379,18 +426,20 @@ export class AzureTicketProvider implements TicketProvider {
     return readyFromActive(await this.list());
   }
 
-  async setStatus(key: string, status: TicketStatus): Promise<StoredTicket> {
+  async setStatus(key: string, status: TicketStatus, assignedTo?: string): Promise<StoredTicket> {
     const { id, fields } = this.showRaw(key);
     const current = parseWorkItem(fields, id, this.columns);
     if (!current) throw new Error(`work-item ${key} not found`);
     // Move by state AND the card's own Kanban column field, so a hand-off reaches
     // the mapped column even when several columns share the target state.
-    execMutate(this.moveArgs(key, status, kanbanColumnField(fields)), this.opts.dryRun);
+    execMutate(this.moveArgs(key, status, kanbanColumnField(fields), assignedTo), this.opts.dryRun);
     return { ...current, status };
   }
 
   async start(key: string, _p: StartProvenance): Promise<StoredTicket> {
-    return this.setStatus(key, 'In progress');
+    // Assign the work item to whoever is running `start`, so it doesn't land on
+    // the board unowned. Best-effort — see `signedInUser`.
+    return this.setStatus(key, 'In progress', this.signedInUser());
   }
 
   async amend(key: string, patch: Partial<Ticket>): Promise<StoredTicket> {
