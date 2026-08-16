@@ -1,10 +1,13 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { parse as parseYaml } from 'yaml';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { slugForStatus } from './providers/status-index.js';
 import type { TicketStatus } from './templates/ticket.js';
 
 export type ProviderName = 'local' | 'github' | 'azure';
+
+/** Where documentation artifacts (PRDs, ADRs, security, plans, diagrams, …) live. */
+export type DocsProviderName = 'local' | 'azure-wiki';
 
 /**
  * The board column mapping — a display column name per logical status. For Azure
@@ -53,9 +56,31 @@ export interface BoardConfig {
    * azure providers. `--target` on the command overrides it.
    */
   prTarget?: string;
+  /**
+   * Docs backend, chosen at `kodi init` (or `kodi docs migrate`). Absent/undefined
+   * behaves as `'local'` (back-compat with projects configured before this field
+   * existed). The azure-wiki provider reuses `organization`/`project` above — it
+   * has no separate org/project pair of its own.
+   */
+  docsProvider?: DocsProviderName;
+  /** Azure wiki name/id. Defaults to `${project}.wiki` (Azure's own project-wiki
+   * naming convention) when unset. Only meaningful for `docsProvider: 'azure-wiki'`. */
+  docsWiki?: string;
+  /**
+   * The project's registered doc types (e.g. `['prd', 'adr', 'security', 'plan',
+   * 'diagrams']`) — the ONLY source of truth for what `kodi docs create <type>` /
+   * `list <type>` accept. Never a fixed enum in code: edit via `kodi docs types
+   * add/remove`, seeded at `kodi init` time.
+   */
+  docsTypes?: string[];
 }
 
 const DEFAULTS: BoardConfig = { provider: 'local', prefix: 'KODI' };
+
+/** The doc types `kodi init`/`installHarness` seed a fresh project with — the same
+ * 5 folders the docs scaffold has always created. Editable afterward via
+ * `kodi docs types add/remove`; never a fixed enum anywhere else in the code. */
+export const DEFAULT_DOC_TYPES = ['prd', 'adr', 'security', 'plan', 'diagrams'];
 
 /** The kodi state file name (per-project, non-secret). */
 export const STATE_FILE = 'kodi-dev.yaml';
@@ -93,6 +118,14 @@ export function loadBoardConfig(cwd = process.cwd()): BoardConfig {
   } catch {
     return { ...DEFAULTS };
   }
+}
+
+/** Persist the board config to the project's `.claude/kodi-dev.yaml`. */
+export function writeBoardConfig(root: string, config: BoardConfig): string {
+  const path = stateFilePath(root);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, stringifyYaml(config), 'utf-8');
+  return path;
 }
 
 /**

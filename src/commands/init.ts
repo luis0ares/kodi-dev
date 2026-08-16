@@ -10,8 +10,14 @@ import {
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
-import { stringify as stringifyYaml } from 'yaml';
-import { stateFilePath, type BoardConfig } from '../config.js';
+import {
+  DEFAULT_DOC_TYPES,
+  stateFilePath,
+  writeBoardConfig,
+  type BoardConfig,
+  type DocsProviderName,
+} from '../config.js';
+import { AzureWikiDocsProvider } from '../providers/azure-wiki-docs.js';
 import { DEFAULT_COLUMNS } from '../providers/azure.js';
 import {
   getProjectInfo,
@@ -225,6 +231,12 @@ export interface InstallOptions {
    * NOT scaffold `docs/tickets/` for those providers. Defaults to `local`.
    */
   provider?: 'local' | 'github' | 'azure';
+  /**
+   * The configured docs provider. When `'azure-wiki'`, the local `prd`/`adr`/
+   * `diagrams`/`plan`/`security` folders are NOT scaffolded — those artifacts
+   * live on the wiki instead. Defaults to `local`.
+   */
+  docsProvider?: DocsProviderName;
 }
 
 /** Install the kodi harness FILES (hook, agents, skills, docs scaffold). */
@@ -262,9 +274,14 @@ export function installHarness(root: string, opts: InstallOptions = {}): string[
 
   // `tickets` is the LOCAL provider's on-disk ticket store — remote boards
   // (github/azure) keep their tickets on the remote, so it is scaffolded ONLY for
-  // the local provider. The rest of the docs scaffold is provider-independent.
+  // the local provider. The prd/adr/diagrams/plan/security folders are likewise
+  // scaffolded only for the LOCAL docs provider — an azure-wiki project keeps
+  // those artifacts on the wiki instead (see DEFAULT_DOC_TYPES, shared with
+  // `configureDocs` so the two never drift).
   const provider = opts.provider ?? 'local';
-  const docsSubs = ['prd', 'adr', 'diagrams', 'plan', 'security'];
+  const docsProvider = opts.docsProvider ?? 'local';
+  const docsSubs: string[] = [];
+  if (docsProvider !== 'azure-wiki') docsSubs.push(...DEFAULT_DOC_TYPES);
   if (provider === 'local') docsSubs.push('tickets');
   for (const sub of docsSubs) {
     mkdirSync(join(root, 'docs', sub), { recursive: true });
@@ -296,6 +313,25 @@ export interface WizardOptions {
   projectOwner?: string;
   projectNumber?: number;
   runner?: Runner;
+  /** Non-interactive docs-backend values (skip the matching prompt when provided). */
+  docsProvider?: DocsProviderName;
+  docsWiki?: string;
+  /** Testing seam for the azure-wiki feature-check/auto-create step — same
+   * purpose as `runner` above. Production omits it (uses `defaultVerifyWiki`). */
+  verifyWiki?: (org: string, project: string, wiki: string) => Promise<void>;
+}
+
+/** Real `AzureWikiDocsProvider.ensureWiki()` — verifies the Wiki feature is
+ * enabled for the project and creates the wiki if it doesn't exist yet. */
+async function defaultVerifyWiki(org: string, project: string, wiki: string): Promise<void> {
+  const provider = new AzureWikiDocsProvider({
+    organization: org,
+    project,
+    wiki,
+    docsTypes: DEFAULT_DOC_TYPES,
+    dryRun: false,
+  });
+  await provider.ensureWiki();
 }
 
 /**
@@ -502,6 +538,84 @@ export async function configureBoard(
 }
 
 /**
+ * Interactive docs-backend configuration, run AFTER the board is configured.
+ * Independent of the board provider: `local` needs nothing further; `azure-wiki`
+ * reuses `board.organization`/`.project` when the board provider is already
+ * `azure` (no re-prompt — the user's config already has them), otherwise prompts
+ * for them the same way `configureBoard`'s azure branch does. The wiki itself is
+ * verified/auto-created by `AzureWikiDocsProvider.ensureWiki()` — no separate
+ * existence check here.
+ */
+export async function configureDocs(
+  prompter: Prompter,
+  board: BoardConfig,
+  opts: WizardOptions = {},
+): Promise<Partial<BoardConfig>> {
+  const docsProvider =
+    opts.docsProvider ??
+    (((await prompter.select(
+      'Where should documentation artifacts (PRDs, ADRs, security, plans, diagrams) live?',
+      ['local docs/ folder', 'Azure DevOps Wiki'],
+    )) === 'Azure DevOps Wiki'
+      ? 'azure-wiki'
+      : 'local') as DocsProviderName);
+
+  if (docsProvider === 'local') {
+    return { docsProvider: 'local', docsTypes: DEFAULT_DOC_TYPES };
+  }
+
+  let org = board.organization;
+  let project = board.project;
+  if (!org || !project) {
+    const orgInput =
+      opts.org ?? (await prompter.input('Azure DevOps organization (name or URL, e.g. acme)'));
+    org = normalizeOrgUrl(orgInput);
+    if (!org) throw new InitAbort('missing: organization.');
+    let projects: string[];
+    try {
+      projects = listProjects(org, opts.runner);
+    } catch (e) {
+      throw new InitAbort(
+        `could not list projects for ${org}. Is \`az\` installed and logged in (az login / az devops login)? ${
+          e instanceof Error ? e.message : ''
+        }`,
+      );
+    }
+    if (projects.length === 0) throw new InitAbort(`no projects found in ${org}.`);
+    project = opts.project;
+    if (project) {
+      if (!projects.includes(project)) {
+        throw new InitAbort(`project "${project}" not found in ${org} (found: ${projects.join(', ')}).`);
+      }
+    } else {
+      project = await prompter.select('Select a project', projects);
+    }
+  }
+
+  const docsWiki = opts.docsWiki ?? `${project}.wiki`;
+
+  // Verify the Wiki feature is enabled and create the wiki if it doesn't exist yet
+  // — never guess past a real failure (AzureWikiDocsProvider.ensureWiki throws a
+  // clear, actionable message when the feature is off). `opts.verifyWiki` is a
+  // testing seam (same purpose as `opts.runner` above) so this branch is
+  // unit-testable without spawning `az` — production always takes the default.
+  const verifyWiki = opts.verifyWiki ?? defaultVerifyWiki;
+  try {
+    await verifyWiki(org, project, docsWiki);
+  } catch (e) {
+    throw new InitAbort(e instanceof Error ? e.message : String(e));
+  }
+
+  return {
+    docsProvider: 'azure-wiki',
+    organization: org,
+    project,
+    docsWiki,
+    docsTypes: DEFAULT_DOC_TYPES,
+  };
+}
+
+/**
  * Interactive GitHub Projects v2 configuration. Issues live in a repo; status is
  * driven by a board's single-select Status field. Discovery proxies `gh`.
  */
@@ -639,12 +753,7 @@ async function configureGithub(prompter: Prompter, opts: WizardOptions): Promise
 }
 
 /** Persist the board config to the project's `.claude/kodi-dev.yaml`. */
-export function writeState(root: string, config: BoardConfig): string {
-  const path = stateFilePath(root);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, stringifyYaml(config), 'utf-8');
-  return path;
-}
+export const writeState = writeBoardConfig;
 
 export function registerInitCommand(program: Command) {
   program
@@ -667,18 +776,22 @@ export function registerInitCommand(program: Command) {
     .option('--done-column <name>', 'Done column')
     .option('--repository <name>', 'repository for PRs (azure: name; github: owner/repo)')
     .option('--pr-target <branch>', 'default target branch for pull requests (non-interactive)')
+    .option('--docs-provider <local|azure-wiki>', 'skip the docs-backend prompt')
+    .option('--docs-wiki <name>', 'azure wiki name (non-interactive, default "<project>.wiki")')
     .action(async (o) => {
       const root = String(o.dir);
 
       // Non-TTY + a remote provider without a way to prompt would hang — guard it.
       let provider = o.provider as 'local' | 'github' | 'azure' | undefined;
       if (!provider && !process.stdin.isTTY) provider = 'local';
+      let docsProvider = o.docsProvider as DocsProviderName | undefined;
+      if (!docsProvider && !process.stdin.isTTY) docsProvider = 'local';
 
       const prompter = readlinePrompter();
       let config: BoardConfig;
       try {
         // Configure the board FIRST so an abort leaves the project untouched.
-        config = await configureBoard(prompter, {
+        const board = await configureBoard(prompter, {
           provider,
           prefix: o.prefix,
           org: o.org,
@@ -695,6 +808,14 @@ export function registerInitCommand(program: Command) {
           repository: o.repository,
           prTarget: o.prTarget,
         });
+        const docs = await configureDocs(prompter, board, {
+          docsProvider,
+          org: o.org,
+          project: o.project,
+          docsWiki: o.docsWiki,
+          runner: undefined,
+        });
+        config = { ...board, ...docs };
       } catch (e) {
         if (e instanceof InitAbort) {
           process.stderr.write(`\nkodi init aborted — ${e.message}\n`);
@@ -706,12 +827,16 @@ export function registerInitCommand(program: Command) {
         prompter.close();
       }
 
-      const changed = installHarness(root, { force: o.force, provider: config.provider });
+      const changed = installHarness(root, {
+        force: o.force,
+        provider: config.provider,
+        docsProvider: config.docsProvider,
+      });
 
       const statePath = writeState(root, config);
       process.stdout.write(
         `\nkodi init: installed\n${changed.map((c) => `  + ${c}`).join('\n')}\n` +
-          `  + ${relative(root, statePath)} (provider: ${config.provider})\n\n` +
+          `  + ${relative(root, statePath)} (provider: ${config.provider}, docs: ${config.docsProvider ?? 'local'})\n\n` +
           `SessionStart wired to \`${HOOK_COMMAND}\` (matchers: ${SESSION_MATCHER}).\n`,
       );
     });

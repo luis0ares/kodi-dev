@@ -1,8 +1,10 @@
-import { loadBoardConfig } from '../config.js';
+import { DEFAULT_DOC_TYPES, loadBoardConfig, type BoardConfig, type DocsProviderName } from '../config.js';
+import { AzureWikiDocsProvider } from './azure-wiki-docs.js';
 import { AzureTicketProvider } from './azure.js';
 import { GithubTicketProvider } from './github.js';
+import { LocalDocsProvider } from './local-docs.js';
 import { LocalTicketProvider } from './local.js';
-import type { TicketProvider } from './types.js';
+import type { DocsProvider, TicketProvider } from './types.js';
 
 export interface ResolveOptions {
   /** `--yes`: actually execute remote mutations (otherwise dry-run). */
@@ -42,4 +44,44 @@ export function resolveProvider(cwd = process.cwd(), opts: ResolveOptions = {}):
   }
 }
 
+/**
+ * Build a docs provider for an EXPLICIT backend name (not necessarily the one
+ * `kodi-dev.yaml` currently has configured) — the seam `docs migrate` needs to
+ * construct both the source and the target regardless of which one is "active".
+ */
+export function docsProviderFor(
+  name: DocsProviderName,
+  cfg: BoardConfig,
+  cwd = process.cwd(),
+  opts: ResolveOptions = {},
+): DocsProvider {
+  const docsTypes = cfg.docsTypes ?? DEFAULT_DOC_TYPES;
+  if (name === 'azure-wiki') {
+    if (!cfg.organization || !cfg.project) {
+      throw new Error(
+        'docs provider is "azure-wiki" but no Azure organization/project is configured — re-run `kodi init`.',
+      );
+    }
+    return new AzureWikiDocsProvider({
+      organization: cfg.organization,
+      project: cfg.project,
+      wiki: cfg.docsWiki,
+      docsTypes,
+      dryRun: !opts.yes,
+    });
+  }
+  return new LocalDocsProvider(docsTypes, cwd);
+}
+
+/**
+ * Resolve the active docs provider from board config. Mirrors {@link resolveProvider}:
+ * `--yes` gates azure-wiki mutations, the local provider ignores it (local writes
+ * are safe and reversible).
+ */
+export function resolveDocsProvider(cwd = process.cwd(), opts: ResolveOptions = {}): DocsProvider {
+  const cfg = loadBoardConfig(cwd);
+  return docsProviderFor(cfg.docsProvider ?? 'local', cfg, cwd, opts);
+}
+
 export type { TicketProvider } from './types.js';
+export type { DocsProvider } from './types.js';
