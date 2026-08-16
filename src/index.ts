@@ -6,6 +6,7 @@ import { registerInitCommand } from './commands/init.js';
 import { registerPrCommand } from './commands/pr.js';
 import { registerServeCommand } from './commands/serve.js';
 import { registerTicketsCommand } from './commands/tickets.js';
+import { checkForUpdate } from './update-check.js';
 
 import { version, name, description } from '../package.json';
 
@@ -24,7 +25,14 @@ registerHookCommand(program);
 registerInitCommand(program);
 registerAddCommand(program);
 
-program.parseAsync(process.argv).catch((err) => {
-  process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
-  process.exitCode = 1;
-});
+program
+  .parseAsync(process.argv)
+  .catch((err) => {
+    process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+    process.exitCode = 1;
+  })
+  .finally(() =>
+    checkForUpdate(name, version, {
+      disabled: process.env.KODI_NO_AUTO_UPDATE === '1' || process.env.CI === 'true',
+    }),
+  );

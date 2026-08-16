@@ -144,6 +144,11 @@ and in installable **skill-packs** (`kodi add`).
 All board/PR mutations proxy `gh` / `az` and are **dry-run unless you pass `--yes`**. The
 provider is read from `.claude/kodi-dev.yaml`.
 
+Every command also checks — at most once a day, capped at 1.5s, never on the critical
+path — whether a newer kodi is published on npm, and installs it directly
+(`npm install -g kodi-dev@latest`) rather than just telling you to. Set
+`KODI_NO_AUTO_UPDATE=1` to opt out (CI is skipped automatically).
+
 ### Tickets
 
 ```bash
