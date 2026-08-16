@@ -1,29 +1,39 @@
 ---
 name: kodi-cli
 description: >-
-  How to drive the kodi CLI to create and manage board tickets and pull requests
-  across the active provider (local / GitHub / Azure DevOps). Use this whenever you
-  need to create, list, update, or transition a ticket/issue/work item, or to open,
-  edit, list, or abandon a pull request — anytime the task involves the board or a
-  PR. kodi is the ONLY sanctioned path: raw `gh pr`, `gh issue`, `gh project`,
-  `az repos pr`, and `az boards` are denied, so route every board/PR action through
-  `kodi`.
+  How to drive the kodi CLI to create and manage board tickets, pull requests, and
+  documentation artifacts (PRDs, ADRs, security reports, plans, diagrams) across the
+  active provider (local / GitHub / Azure DevOps) and docs backend (local / Azure
+  DevOps Wiki). Use this whenever you need to create, list, update, or transition a
+  ticket/issue/work item; open, edit, list, or abandon a pull request; or read/write
+  ANY doc artifact under docs/ — anytime the task touches the board, a PR, or a doc.
+  kodi is the ONLY sanctioned path: raw `gh pr`, `gh issue`, `gh project`,
+  `az repos pr`, `az boards`, and hand-written files under `docs/` are all denied —
+  route every board/PR/doc action through `kodi`.
 ---
 
-# kodi CLI — tickets & pull requests
+# kodi CLI — tickets, pull requests & docs
 
-`kodi` proxies the board provider (local / GitHub / Azure DevOps) behind a
-**validated template**. The provider is read from `.claude/kodi-dev.yaml` (written
-by `kodi init`); you rarely pass it explicitly.
+`kodi` proxies the board provider (local / GitHub / Azure DevOps) and the docs
+backend (local / Azure DevOps Wiki) behind **validated templates**. Both are read
+from `.claude/kodi-dev.yaml` (written by `kodi init`); you rarely pass them
+explicitly.
 
 ## Golden rules
 
 - **Always go through `kodi`.** The raw `gh pr` / `gh issue` / `gh project` /
-  `az repos pr` / `az boards` commands are denied by the project permissions. Use
-  the `kodi` equivalents below.
+  `az repos pr` / `az boards` commands are denied by the project permissions. A doc
+  artifact (PRD/ADR/security/plan/diagrams/…) is **never** written or read with the
+  `Write`/`Edit`/`Read` tools directly — always `kodi docs`. This is not optional:
+  the docs backend can be an Azure DevOps Wiki, which a filesystem tool cannot see
+  at all, so a direct file write would silently vanish and a direct file read would
+  silently miss real content.
 - **Remote mutations are dry-run by default.** Every create/update/delete prints the
   exact provider command and does nothing until you add `--yes`. Preview first, then
-  re-run with `--yes` to execute.
+  re-run with `--yes` to execute. (The local docs/local board providers write
+  immediately — they're safe, reversible plain files — but the CLI surface and
+  `--yes` flag stay identical across providers so you never need to know which one
+  is active.)
 - **Templates are enforced by the CLI (Zod).** A draft that misses a required
   section is rejected with a section-by-section error — fix it and retry; never try
   to bypass the template.
@@ -46,15 +56,16 @@ kodi tickets create \
   --ac "Rows are validated" \
   --non-goal "No XLSX support" \
   --dep KODI-001 \
-  --prd docs/prd/0001 \
-  --adr docs/adr/0002 \
-  --security docs/security/KODI-014-sqli-login.md \
+  --prd PRD-0001 \
+  --adr ADR-0002 \
+  --security SECURITY-0014 \
   --yes
 ```
 
 - `--ac` / `--non-goal` / `--dep` / `--adr` are **repeatable**.
 - Drivers: `--prd`, `--adr` (repeatable), `--security` — trace each ticket to what
-  drives it.
+  drives it. Pass the doc's **id** (`PRD-0001`, not a file path) — ids are stable
+  across whichever docs backend is active (see below), paths are not.
 - Alternatively pass a full JSON draft with `-f/--file <path>` (validated the same way).
 
 ### Inspect & order
@@ -151,6 +162,84 @@ kodi pr abandon 42 --yes
 --provider github|azure        # override the provider from kodi-dev.yaml
 --repository <repo>            # gh: OWNER/REPO ; az: repository name
 ```
+
+---
+
+## Docs — `kodi docs`
+
+Every documentation artifact — PRD, ADR, security report, plan, diagrams, or any
+other type the project has registered — lives behind `kodi docs`, on whichever
+backend `kodi-dev.yaml` has configured (`local` docs/ folder, or an **Azure DevOps
+Wiki**). **Never `Write`/`Edit`/`Read` a file under `docs/<type>/` directly** — on
+an azure-wiki project there is no such file to touch, and even on a local project a
+direct write skips the id assignment and the auto-regenerated index.
+
+Every doc carries required frontmatter — `name`, `description`, `type` — plus
+whatever extra fields are useful for that type (a PRD's `status`, a security
+report's `ticket`/`severity`, …), passed as repeatable `--meta key=value`. Types are
+**project-defined**, not hardcoded — `kodi docs types list` shows what's registered
+for this project (typically `prd`, `adr`, `security`, `plan`, `diagrams`).
+
+### Create
+
+```bash
+kodi docs create prd \
+  --name "CSV dataset import" \
+  --description "Users can import a dataset from a CSV file." \
+  --file draft.md \
+  --meta status=Proposed \
+  --yes
+# -> PRD-0001 (auto-numbered per type: PRD-0001, PRD-0002, …)
+```
+
+- `-f/--file <path>` (the body as a markdown file) or `--content <text>` (inline) —
+  one is required. For anything longer than a couple of lines, use `--file`: write
+  the draft to a temp path with a `Bash` heredoc (`cat > /tmp/draft.md <<'EOF' ...
+  EOF`), no `Write` tool needed, then pass that path — cleaner than escaping a long
+  multi-paragraph string into `--content`.
+- `--meta key=value` is **repeatable** — every extra frontmatter field beyond the
+  three required ones.
+- The id (`PRD-0001`, `ADR-0003`, `SECURITY-0014`, …) is what you cite elsewhere
+  (ticket drivers, cross-references between docs) — never a file path, which only
+  makes sense for the local backend.
+
+### Read
+
+```bash
+kodi docs types list              # the project's registered doc types
+kodi docs list                    # every doc, every type
+kodi docs list adr                # one type only
+kodi docs get PRD-0001            # full doc: frontmatter + body
+kodi docs get PRD-0001 --json     # machine-readable
+```
+
+### Update / delete / reindex
+
+```bash
+kodi docs update ADR-0003 --file revised.md --meta status=Accepted --yes
+kodi docs delete SECURITY-0014 --yes
+kodi docs reindex --yes           # regenerate the book-style index/table of contents
+```
+
+- **`update` revises a doc in place, at its EXISTING id** — the right command for
+  "the PRD changed" / "an ADR moved from Proposed to Accepted" / "fix this doc".
+  Every flag is optional and only overwrites what you pass — `--name`/
+  `--description`/`--file`/`--content` default to the doc's current value, and
+  `--meta` fields not named are kept as-is (so `--meta status=Accepted` alone
+  changes just that one field). **`create` always mints a NEW id — never use it to
+  revise an existing doc**, or you'll end up with duplicate near-identical docs.
+- `reindex` runs automatically after `create`/`update`/`delete`; run it by hand only
+  after an out-of-band change.
+
+### Registering a new type
+
+```bash
+kodi docs types add mockup
+kodi docs types remove mockup
+```
+
+Only needed when a doc doesn't fit any of the project's existing types — check
+`kodi docs types list` first.
 
 ---
 

@@ -73,7 +73,8 @@ Only the essentials that every agent needs in every context:
 - **Ticket provider:** local | github | azure
 - **Gate commands:** lint / type / test / e2e (or "TBD")
 - **Skill-packs installed:** <list or none>
-- **Docs:** docs/prd, docs/adr, docs/diagrams, docs/plan, docs/security
+- **Docs backend:** local | azure-wiki — managed via `kodi docs` (never write/read
+  docs/<type>/ files directly, see the `kodi-cli` skill)
 ```
 
 If a value is unknown at briefing time, write `TBD — decided in planning` rather

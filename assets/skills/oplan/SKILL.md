@@ -2,8 +2,8 @@
 name: oplan
 description: >-
   Run kodi's Planning phase — drive the hub-and-spoke manager/leaf loop (PRD →
-  architecture ∥ UX → phases → QA gate) into a consolidated, phased plan in
-  docs/plan. Use this whenever the user runs /oplan, or says things like "let's
+  architecture ∥ UX → phases → QA gate) into a consolidated, phased plan managed via
+  `kodi docs`. Use this whenever the user runs /oplan, or says things like "let's
   plan this", "plan the project/feature", "turn the briefing into a plan", "design
   the architecture and UX", "break the work into a roadmap" — anytime they move
   from briefing toward a plan, even without the word "plan".
@@ -17,8 +17,10 @@ naming its leaves → YOU spawn the leaves → they return → YOU validate. Loo
 
 **Order:** `detail` (PRD — human sign-off) → `architect` ∥ `ux-lead` (parallel,
 sealed-bid, you reconcile cross-review and surface conflicts) → `phases` (split
-into MVP-first phases) → `qa-planning` (validation gate only). Then write the
-phased plan to `docs/plan` for human review.
+into MVP-first phases) → `qa-planning` (validation gate only). Every artifact (PRD,
+ADRs, UX specs, the phased plan) is persisted by the agent that authors it via
+`kodi docs create` (see the `kodi-cli` skill) — never written to `docs/` directly,
+by you or any sub-agent.
 
 Subtrees: `architect` → `system-architect`, `data-engineer`; `ux-lead` →
 `researcher`, `brand`, `component-engineer`.
