@@ -1,7 +1,7 @@
 {
   "src/commands/init.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 5
+      "count": 3
     }
   },
   "src/commands/tickets.ts": {
@@ -11,7 +11,7 @@
   },
   "src/providers/azure-discovery.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 2
+      "count": 6
     }
   },
   "src/providers/azure.ts": {
@@ -21,12 +21,12 @@
   },
   "src/providers/github-discovery.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 5
+      "count": 7
     }
   },
   "src/providers/github.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 1
+      "count": 2
     }
   }
 }

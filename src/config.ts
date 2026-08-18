@@ -6,9 +6,6 @@ import type { TicketStatus } from './templates/ticket.js';
 
 export type ProviderName = 'local' | 'github' | 'azure';
 
-/** Where documentation artifacts (PRDs, ADRs, security, plans, diagrams, …) live. */
-export type DocsProviderName = 'local' | 'azure-wiki';
-
 /**
  * The board column mapping — a display column name per logical status. For Azure
  * these are the real BOARD COLUMNS the user sees (which may outnumber the
@@ -57,23 +54,6 @@ export interface BoardConfig {
    */
   prTarget?: string;
   /**
-   * Docs backend, chosen at `kodi init` (or `kodi docs migrate`). Absent/undefined
-   * behaves as `'local'` (back-compat with projects configured before this field
-   * existed). The azure-wiki provider reuses `organization`/`project` above — it
-   * has no separate org/project pair of its own.
-   */
-  docsProvider?: DocsProviderName;
-  /** Azure wiki name/id. Defaults to `${project}.wiki` (Azure's own project-wiki
-   * naming convention) when unset. Only meaningful for `docsProvider: 'azure-wiki'`. */
-  docsWiki?: string;
-  /**
-   * The project's registered doc types (e.g. `['prd', 'adr', 'security', 'plan',
-   * 'diagrams']`) — the ONLY source of truth for what `kodi docs create <type>` /
-   * `list <type>` accept. Never a fixed enum in code: edit via `kodi docs types
-   * add/remove`, seeded at `kodi init` time.
-   */
-  docsTypes?: string[];
-  /**
    * Where `kodi tickets start --worktree` creates worktrees, relative to the
    * project root (the directory `.claude/kodi-dev.yaml` lives under). Defaults
    * to {@link DEFAULT_WORKTREES_DIR} when unset.
@@ -91,11 +71,6 @@ export interface BoardConfig {
 }
 
 const DEFAULTS: BoardConfig = { provider: 'local', prefix: 'KODI' };
-
-/** The doc types `kodi init`/`installHarness` seed a fresh project with — the same
- * 5 folders the docs scaffold has always created. Editable afterward via
- * `kodi docs types add/remove`; never a fixed enum anywhere else in the code. */
-export const DEFAULT_DOC_TYPES = ['prd', 'adr', 'security', 'plan', 'diagrams'];
 
 /** Default location for `kodi tickets start --worktree`, relative to the project
  * root — alongside `.claude/kodi-dev.yaml`. Overridable via `worktreesDir` in

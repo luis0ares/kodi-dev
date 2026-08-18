@@ -1,6 +1,5 @@
 import { Command } from 'commander';
 import { registerAddCommand } from './commands/add.js';
-import { registerDocsCommand } from './commands/docs.js';
 import { registerHookCommand } from './commands/hook.js';
 import { registerInitCommand } from './commands/init.js';
 import { registerPrCommand } from './commands/pr.js';
@@ -18,7 +17,6 @@ program
   .version(version, '-v, --version', 'output the current version');
 
 registerTicketsCommand(program);
-registerDocsCommand(program);
 registerServeCommand(program);
 registerPrCommand(program);
 registerHookCommand(program);

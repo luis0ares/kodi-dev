@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   configureBoard,
-  configureDocs,
   DEFAULT_ENV,
   installHarness,
   mergeEnv,
@@ -15,7 +14,6 @@ import {
   PERMISSION_DENY,
   writeState,
 } from '../src/commands/init.js';
-import { DEFAULT_DOC_TYPES, type BoardConfig } from '../src/config.js';
 import type { Prompter } from '../src/prompt.js';
 import { normalizeOrgUrl, type Runner } from '../src/providers/azure-discovery.js';
 
@@ -576,96 +574,6 @@ describe('configureBoard wizard', () => {
       runner: fakeGh({ branches: ['main', 'develop'] }),
     });
     expect(cfg.prTarget).toBe('develop');
-  });
-});
-
-describe('configureDocs wizard', () => {
-  const azureBoard: BoardConfig = {
-    provider: 'azure',
-    prefix: 'KODI',
-    organization: 'https://dev.azure.com/dynaccurate',
-    project: 'EPR-V2',
-  };
-  const localBoard: BoardConfig = { provider: 'local', prefix: 'KODI' };
-
-  it('local: needs no further prompting', async () => {
-    const cfg = await configureDocs(scripted({ select: ['local docs/ folder'] }), localBoard);
-    expect(cfg).toEqual({ docsProvider: 'local', docsTypes: DEFAULT_DOC_TYPES });
-  });
-
-  it('local: --docs-provider skips the prompt', async () => {
-    const cfg = await configureDocs(scripted({}), localBoard, { docsProvider: 'local' });
-    expect(cfg.docsProvider).toBe('local');
-  });
-
-  it('azure-wiki: reuses the azure board org/project — no re-prompt', async () => {
-    let seenOrg = '';
-    let seenProject = '';
-    const cfg = await configureDocs(
-      scripted({ select: ['Azure DevOps Wiki'] }),
-      azureBoard,
-      {
-        verifyWiki: async (org, project) => {
-          seenOrg = org;
-          seenProject = project;
-        },
-      },
-    );
-    expect(seenOrg).toBe('https://dev.azure.com/dynaccurate');
-    expect(seenProject).toBe('EPR-V2');
-    expect(cfg).toEqual({
-      docsProvider: 'azure-wiki',
-      organization: 'https://dev.azure.com/dynaccurate',
-      project: 'EPR-V2',
-      docsWiki: 'EPR-V2.wiki',
-      docsTypes: DEFAULT_DOC_TYPES,
-    });
-  });
-
-  it('azure-wiki: prompts for org/project when the board provider is not azure', async () => {
-    const cfg = await configureDocs(
-      scripted({ select: ['Azure DevOps Wiki', 'Alpha'], input: ['dynaccurate'] }),
-      localBoard,
-      { runner: fakeAz(), verifyWiki: async () => {} },
-    );
-    expect(cfg.organization).toBe('https://dev.azure.com/dynaccurate');
-    expect(cfg.project).toBe('Alpha');
-    expect(cfg.docsWiki).toBe('Alpha.wiki');
-  });
-
-  it('azure-wiki: --docs-wiki overrides the default "<project>.wiki" name', async () => {
-    let seenWiki = '';
-    const cfg = await configureDocs(scripted({ select: ['Azure DevOps Wiki'] }), azureBoard, {
-      docsWiki: 'Custom.wiki',
-      verifyWiki: async (_org, _project, wiki) => {
-        seenWiki = wiki;
-      },
-    });
-    expect(seenWiki).toBe('Custom.wiki');
-    expect(cfg.docsWiki).toBe('Custom.wiki');
-  });
-
-  it('azure-wiki: aborts with an actionable message when the Wiki feature is disabled', async () => {
-    await expect(
-      configureDocs(scripted({ select: ['Azure DevOps Wiki'] }), azureBoard, {
-        verifyWiki: async () => {
-          throw new Error(
-            'Azure DevOps Wiki is not enabled for project "EPR-V2". Enable it in Project Settings -> Overview -> Features, then try again.',
-          );
-        },
-      }),
-    ).rejects.toThrow(/Enable it in Project Settings/);
-  });
-
-  it('azure-wiki: auto-creates the wiki when the feature is on but no wiki exists yet (verifyWiki never throws)', async () => {
-    let created = false;
-    const cfg = await configureDocs(scripted({ select: ['Azure DevOps Wiki'] }), azureBoard, {
-      verifyWiki: async () => {
-        created = true; // stands in for AzureWikiDocsProvider.ensureWiki()'s create branch
-      },
-    });
-    expect(created).toBe(true);
-    expect(cfg.docsProvider).toBe('azure-wiki');
   });
 });
 

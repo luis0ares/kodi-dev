@@ -42,9 +42,9 @@ make install               # build + install the kodi binary globally from sourc
   (ask-never-assume, ADR-is-law) into every session;
 - installs the **phase skills** (`/discover`, `/oplan`, `/tickets`, `/ticket-start`, …),
   the **sub-agents**, and a `docs/` scaffold;
-- configures your **board provider** and **docs backend**, and writes
-  `.claude/kodi-dev.yaml` — every field it can write, and every field it can't, is listed in
-  full in [Configuration reference](#configuration-reference-kodi-devyaml) below.
+- configures your **board provider**, and writes `.claude/kodi-dev.yaml` — every field
+  it can write, and every field it can't, is listed in full in [Configuration
+  reference](#configuration-reference-kodi-devyaml) below.
 
 It is **idempotent** — it merges into an existing `.claude/settings.json` without
 clobbering other hooks, so it is safe to re-run.
@@ -53,11 +53,11 @@ clobbering other hooks, so it is safe to re-run.
 
 kodi tracks work on a board and drives ticket status through it. Pick one at init:
 
-| Provider     | Where tickets live                                   | Status is driven by                                  |
-| ------------ | ----------------------------------------------------- | ----------------------------------------------------- |
-| **`local`**  | one file per ticket under **`docs/tickets/`**        | a local status index — no external service           |
-| **`github`** | repo **issues**, added to a **Projects v2** board    | the board's single-select **Status** field           |
-| **`azure`**  | Azure DevOps **work items** on a **basic board**     | the board columns                                     |
+| Provider     | Where tickets live                                | Status is driven by                        |
+| ------------ | ------------------------------------------------- | ------------------------------------------ |
+| **`local`**  | one file per ticket under **`docs/tickets/`**     | a local status index — no external service |
+| **`github`** | repo **issues**, added to a **Projects v2** board | the board's single-select **Status** field |
+| **`azure`**  | Azure DevOps **work items** on a **basic board**  | the board columns                          |
 
 Auth is inherited from your already-logged-in `gh` / `az` CLIs — kodi never stores
 credentials.
@@ -80,11 +80,11 @@ gh auth refresh -s project --hostname github.com  # grant the Projects scope (NO
 
 `kodi init` discovers the rest for you:
 
-| You provide                                             | kodi discovers                                                          |
-| ------------------------------------------------------- | ---------------------------------------------------------------------- |
-| whether the board is owned by an **org** or a **user**  | the project **number** (pick from a list)                              |
+| You provide                                             | kodi discovers                                                              |
+| ------------------------------------------------------- | --------------------------------------------------------------------------- |
+| whether the board is owned by an **org** or a **user**  | the project **number** (pick from a list)                                   |
 | the **owner login** (user-owned defaults to your login) | the Status field's **columns** (map To Do / In Progress / To Review / Done) |
-| —                                                       | the **repository** (the current repo is offered first)                 |
+| —                                                       | the **repository** (the current repo is offered first)                      |
 
 > [!NOTE]
 > GitHub's built-in board has only `Todo` / `In Progress` / `Done` — no "To Review". Map
@@ -105,18 +105,6 @@ kodi init --provider github \
 The `azure` provider stores tickets as work items on a **basic board**. `kodi init` lists
 the real board columns and maps them to kodi's states; auth is inherited from `az login`.
 
-### Docs backend
-
-Independent of the board provider, `kodi init` also asks where **documentation artifacts**
-(PRDs, ADRs, security, plans, diagrams — see [`kodi docs`](#docs)) should live: the local
-`docs/` folder, or an **Azure DevOps Wiki**. Choosing the wiki reuses the org/project
-already configured for an `azure` board (no re-prompt); otherwise it asks once. `kodi init`
-verifies the Wiki feature is enabled for the project and creates the wiki
-(`<project>.wiki`) if it doesn't exist yet — it never guesses past a real failure: if the
-feature itself is disabled, it tells you to enable it in **Project Settings → Overview →
-Features** and stops. Switch backends later (and copy every doc across, preserving ids)
-with `kodi docs migrate --to <local|azure-wiki> --yes`.
-
 ---
 
 ## Configuration reference (`kodi-dev.yaml`)
@@ -128,35 +116,32 @@ editing the YAML.
 
 ### Set by `kodi init`
 
-| Field | Meaning | Set for |
-| --- | --- | --- |
-| `provider` | Board provider: `local` \| `github` \| `azure` | always |
-| `prefix` | Local ticket key prefix (default `KODI`) | `local` |
-| `organization` | Azure DevOps org URL | `azure` board, or an `azure-wiki` docs backend when the board isn't `azure` |
-| `project` | Azure DevOps project name | `azure` board, or an `azure-wiki` docs backend when the board isn't `azure` |
-| `team` | Azure team that owns the board | `azure` |
-| `board` | Azure board name (e.g. `Issues`) | `azure` |
-| `columnStates` | Chosen column name → work-item state, discovered from the real board | `azure` |
-| `repository` | Repo for PRs/issues (Azure: bare name; GitHub: `owner/repo`) | `azure`, `github` |
-| `projectOwner` | GitHub Projects v2 owner login (org or user) | `github` |
-| `projectNumber` | GitHub Projects v2 board number | `github` |
-| `columns` | Status → column map (`todo`/`inProgress`/`toReview`/`done`) | `github`, `azure` |
-| `prTarget` | Default target branch for `kodi pr create`, chosen from the remote's real branches | `github`, `azure` |
-| `docsProvider` | Docs backend: `local` \| `azure-wiki` | always (a separate prompt from the board provider) |
-| `docsWiki` | Azure wiki name (default `<project>.wiki`) | `azure-wiki` docs |
-| `docsTypes` | The project's registered doc types | always — seeded with `[prd, adr, security, plan, diagrams]`; edit the list afterward with `kodi docs types add/remove` (not re-prompted by `init`) |
+| Field           | Meaning                                                                            | Set for           |
+| --------------- | ---------------------------------------------------------------------------------- | ----------------- |
+| `provider`      | Board provider: `local` \| `github` \| `azure`                                     | always            |
+| `prefix`        | Local ticket key prefix (default `KODI`)                                           | `local`           |
+| `organization`  | Azure DevOps org URL                                                               | `azure`           |
+| `project`       | Azure DevOps project name                                                          | `azure`           |
+| `team`          | Azure team that owns the board                                                     | `azure`           |
+| `board`         | Azure board name (e.g. `Issues`)                                                   | `azure`           |
+| `columnStates`  | Chosen column name → work-item state, discovered from the real board               | `azure`           |
+| `repository`    | Repo for PRs/issues (Azure: bare name; GitHub: `owner/repo`)                       | `azure`, `github` |
+| `projectOwner`  | GitHub Projects v2 owner login (org or user)                                       | `github`          |
+| `projectNumber` | GitHub Projects v2 board number                                                    | `github`          |
+| `columns`       | Status → column map (`todo`/`inProgress`/`toReview`/`done`)                        | `github`, `azure` |
+| `prTarget`      | Default target branch for `kodi pr create`, chosen from the remote's real branches | `github`, `azure` |
 
 ### Additional configuration (not set by `kodi init`)
 
 These exist for cases the wizard deliberately doesn't ask about — there's no sensible
 default to prompt for, so they're opt-in, hand-edited fields:
 
-| Field | Meaning | Default when unset |
-| --- | --- | --- |
-| `worktreesDir` | Where `kodi tickets start --worktree` creates worktrees, relative to the project root | `.claude/worktrees` |
+| Field          | Meaning                                                                                                                                                                   | Default when unset                               |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `worktreesDir` | Where `kodi tickets start --worktree` creates worktrees, relative to the project root                                                                                     | `.claude/worktrees`                              |
 | `sourceBranch` | The branch `kodi tickets start` bases a **new** `slice/kodi-<id>` branch (or worktree) on. Ignored when the slice branch already exists — reusing one keeps its own base. | the current active branch (default git behavior) |
 
-Example — a project on the `azure` board provider, local docs, with both additional fields set:
+Example — a project on the `azure` board provider, with both additional fields set:
 
 ```yaml
 provider: azure
@@ -177,10 +162,8 @@ columnStates:
   Done: Done
 repository: MyProject
 prTarget: main
-docsProvider: local
-docsTypes: [prd, adr, security, plan, diagrams]
-worktreesDir: .claude/worktrees   # optional — this is the default anyway
-sourceBranch: develop             # optional — every new slice branches from develop
+worktreesDir: .claude/worktrees # optional — this is the default anyway
+sourceBranch: develop # optional — every new slice branches from develop
 ```
 
 ---
@@ -191,12 +174,12 @@ kodi runs three explicit phases — **no auto-advancing pipeline** — each trig
 skill and coordinated by an orchestrator. Every hand-off is a durable artifact, so a phase
 can be re-run or resumed after a `/clear` or `/compact`.
 
-| Phase       | Skill(s)             | Orchestrator                     | Output                             |
-| ----------- | -------------------- | -------------------------------- | ----------------------------------- |
-| Briefing    | `/discover`          | main-loop                        | `briefing.md` + thin `CLAUDE.md`   |
-| Planning    | `/oplan`, `/oreplan` | main-loop (hub-and-spoke)        | phased plan in `docs/plan`         |
-| Ticketing   | `/tickets`, `/retickets` | main-loop → CLI              | tickets on the board               |
-| Build       | `/ticket-start`      | `build-orchestrator` (sub-agent) | vertical slice → gates → PR        |
+| Phase     | Skill(s)                 | Orchestrator                     | Output                           |
+| --------- | ------------------------ | -------------------------------- | -------------------------------- |
+| Briefing  | `/discover`              | main-loop                        | `briefing.md` + thin `CLAUDE.md` |
+| Planning  | `/oplan`, `/oreplan`     | main-loop (hub-and-spoke)        | phased plan in `docs/plan`       |
+| Ticketing | `/tickets`, `/retickets` | main-loop → CLI                  | tickets on the board             |
+| Build     | `/ticket-start`          | `build-orchestrator` (sub-agent) | vertical slice → gates → PR      |
 
 Engineers know their **role**, not your stack — the stack lives in the thin `CLAUDE.md`
 and in installable **skill-packs** (`kodi add`).
@@ -283,7 +266,7 @@ kodi tickets open       # alias of serve
 kodi tickets serve --port 4000
 ```
 
-It is intentionally read-only — a fast way to *see* the backlog and its dependency graph,
+It is intentionally read-only — a fast way to _see_ the backlog and its dependency graph,
 not to edit it. Mutations always go through the CLI.
 
 ### Pull requests
@@ -299,33 +282,6 @@ kodi pr create --source feat/x --target main -t "Title" -s "Summary" --yes
 kodi pr list
 kodi pr abandon <id>
 ```
-
-### Docs
-
-`kodi docs` manages documentation artifacts — PRDs, ADRs, security docs, plans, diagrams,
-or any other type your project registers — either as local files under `docs/` or as pages
-on an **Azure DevOps Wiki** (`kodi init` asks which; see [Docs backend](#docs-backend)).
-Every doc carries a small YAML frontmatter block (Claude skill/agent-frontmatter style):
-`name`, `description` and `type` are required on every doc; anything else is free-form per
-type and never validated by kodi. Doc types are **not** hardcoded — they live in
-`kodi-dev.yaml`'s `docsTypes` list, editable with `kodi docs types`.
-
-```bash
-kodi docs types list                          # the project's registered doc types
-kodi docs types add mockup                    # register a new type
-kodi docs create prd --name "Document Handling" --description "In-platform viewer" \
-  --file draft.md --yes                       # -> PRD-0001 (auto-numbered, per type)
-kodi docs list prd                            # or `kodi docs list` for every type
-kodi docs get PRD-0001                        # prints the full doc (frontmatter + body)
-kodi docs delete PRD-0001 --yes
-kodi docs reindex --yes                       # regenerate the index (see below)
-kodi docs migrate --to azure-wiki --yes       # copy every doc onto another backend,
-                                               #   preserving ids, and switch to it
-```
-
-The docs backend also maintains a **book-style index** — a page (the wiki's `/Index`, or
-`docs/README.md` locally) grouping every doc by type with a link and its one-line
-description, regenerated automatically after `create`/`delete`/`migrate`.
 
 ### Skill-packs
 

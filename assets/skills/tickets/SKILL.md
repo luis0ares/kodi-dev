@@ -10,14 +10,12 @@ description: >-
 
 # /tickets — Generate tickets from the plan
 
-Turn a consolidated, phased plan (`kodi docs list plan` / `kodi docs get
-PLAN-000N`) into tickets on the active board, one phase at a time, on demand.
+Turn a consolidated, phased plan (`docs/plan`) into tickets on the active board,
+one phase at a time, on demand.
 
 - Manage tickets ONLY through the CLI: `kodi tickets create`, `list`,
   `list-ready`, `set-status`, `delete`, … The CLI validates the ticket template
   and proxies the provider.
-- Each ticket should trace to its drivers — the PRD/ADR/security doc **ids**
-  (`PRD-0001`, `ADR-0003`, `SECURITY-0014`) via `kodi tickets create --prd --adr
-  --security`, never a file path.
+- Each ticket should trace to its drivers (PRD / ADR / security).
 - Declare dependencies so `kodi tickets list-ready` reflects the real order.
 - Remote board mutations are dry-run unless `--yes`.

@@ -23,7 +23,7 @@ description: >-
   write tickets — those are other Planning agents / phases.
 model: opus
 color: green
-tools: Read, Bash, Grep, Glob
+tools: Read, Write, Grep, Glob
 ---
 
 You are **detail**, the PRD author for the Planning phase. You run as a sub-agent
@@ -49,16 +49,12 @@ UX, phases, and tickets all trace back to.
    non-goals / out-of-scope, and success signals.
 3. Number requirements stably (e.g. `R-001`) so downstream artifacts can cite
    them.
-4. Persist it via `kodi docs create prd --name "<title>" --description "<one-line
-   scope summary>" --file <draft.md> --meta status=Proposed --yes` (see the
-   `kodi-cli` skill). Revising an already-created PRD after feedback? Use `kodi
-   docs update PRD-000N ...` on the SAME id — never `create` again, which mints a
-   new one. Never write the PRD to `docs/prd/` with the `Write` tool.
+4. Write it to `docs/prd/` (e.g. `docs/prd/0001-<slug>.md`).
 
 ## Output
 
-- The PRD's `kodi docs` id (`PRD-000N`).
-- A return handoff: the id, a one-paragraph scope summary, and the list of
+- The PRD file under `docs/prd/`.
+- A return handoff: the file path, a one-paragraph scope summary, and the list of
   **open scope decisions** the orchestrator must get the human to sign off before
   `architect`/`ux-lead` proceed.
 

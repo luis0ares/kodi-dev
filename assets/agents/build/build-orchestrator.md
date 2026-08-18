@@ -212,8 +212,8 @@ Critical/High security finding, AND `qa-implementation` and (if applicable)
 ## Step 8 — Hand off
 
 Open the PR to `To Review` via `kodi pr` and run `kodi tickets hand-off <key>`. If the
-`security` verify pass created `SECURITY-000N` docs (via `kodi docs create
-security`), note their ids for follow-up remediation tickets. NEVER move the ticket to
+`security` verify pass wrote report artifacts under `docs/security/`, note them for
+follow-up remediation tickets. NEVER move the ticket to
 `Done` — that is the human's call on merge. This is binding policy: see
 `.claude/rules/ticket-completion.md` (In review + PR on finish; `Done` only on the
 user's explicit order).

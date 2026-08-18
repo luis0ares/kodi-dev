@@ -36,8 +36,8 @@ never pretend already-built work can be edited away.
 2. **Read current state — including status.** `kodi tickets get <key>` for each
    target (note its status: `Pending | In progress | To review | Done`); `kodi
    tickets list --json` for the whole board (dependency graph + every affected
-   ticket's status); read the drivers each target traces to — `kodi docs get
-   <id>` for its PRD/ADR/security doc(s).
+   ticket's status); read the plan drivers in `docs/plan` (PRD / ADR / security) the
+   targets trace to.
 
 3. **Impact analysis — the centerpiece.** Produce a report with these five sections:
    - **Blast radius** — upstream deps the target relies on and downstream tickets
