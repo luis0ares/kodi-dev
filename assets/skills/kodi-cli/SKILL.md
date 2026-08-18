@@ -67,6 +67,8 @@ kodi tickets create \
   drives it. Pass the doc's **id** (`PRD-0001`, not a file path) — ids are stable
   across whichever docs backend is active (see below), paths are not.
 - Alternatively pass a full JSON draft with `-f/--file <path>` (validated the same way).
+- `--iteration <name>` assigns it to an iteration/sprint (azure/github only — see
+  *Iterations / sprints* below). Skipped in a dry-run preview (nothing to assign yet).
 
 ### Inspect & order
 
@@ -106,6 +108,28 @@ kodi tickets delete KODI-003 --yes
   omits it. `--worktree` and `--no-branch` are mutually exclusive (rejected).
 
 > Never move a ticket to `Done` yourself — that is the human's call on merge.
+
+### Iterations / sprints — azure/github only
+
+```bash
+kodi tickets iterations                     # every iteration, dates, current one marked
+kodi tickets list                           # default: current iteration + unscheduled tickets
+kodi tickets list --iteration "Sprint 12"   # one specific iteration instead
+kodi tickets list --all-iterations          # disable the filter — every ticket, every sprint
+kodi tickets amend KODI-003 --iteration "Sprint 12" --yes   # assign after the fact
+```
+
+- **`local` has no iteration concept** — `kodi tickets iterations` and any
+  `--iteration`/`--all-iterations` flag error clearly (`the local provider does not
+  support iterations/sprints`) rather than silently doing nothing.
+- The default (unflagged) listing degrades gracefully — no error, no filter — on a
+  project that hasn't configured sprints at all (azure: no team, or no current
+  iteration; github: no Iteration-type field). Only an EXPLICIT `--iteration <name>`
+  or the `iterations` command throws when there's nothing to resolve it against.
+- Iteration assignment is board-native, never part of the ticket template/marker —
+  the same rule `status` already follows (the board's real value always wins over
+  anything embedded in the record). That's why it's a flag on `create`/`amend`, not a
+  field in a JSON draft.
 
 ---
 

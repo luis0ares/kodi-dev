@@ -232,6 +232,11 @@ kodi tickets start KODI-001 --yes             # → In progress, assigns you, cu
 kodi tickets start KODI-001 --worktree --yes  # …or an isolated worktree instead
 kodi tickets start KODI-002 --no-branch --yes # bundling onto a branch another `start` already cut
 kodi tickets hand-off KODI-001 --pr <url>     # end of slice: → To Review, link the PR
+kodi tickets iterations                       # list every iteration/sprint (azure/github only)
+kodi tickets list --iteration "Sprint 12"     # one specific iteration instead of the current one
+kodi tickets list --all-iterations            # disable iteration filtering — every ticket, every sprint
+kodi tickets create ... --iteration "Sprint 12" --yes   # assign to an iteration on create
+kodi tickets amend KODI-001 --iteration "Sprint 12" --yes   # …or after the fact
 ```
 
 `start` always cuts (or reuses) a `slice/kodi-<id>` git branch, based on the current
@@ -257,6 +262,15 @@ with `tickets get <key>`, which never filters. The trade-off: a dependency key t
 matches nothing now reads as satisfied instead of blocking forever — `create` and `amend`
 warn about unknown keys at write time, confirming each one with a targeted lookup so a
 dependency on finished work stays silent.
+
+**Iterations/sprints — `azure` and `github` only** (`local` has no such concept and
+rejects `--iteration`/`iterations` with a clear error). `list` defaults to the **current**
+iteration plus anything not yet scheduled into any sprint; `--iteration <name>` views one
+specific (e.g. past) iteration instead, and `--all-iterations` disables the filter
+entirely. `kodi tickets iterations` lists every iteration with its dates and marks the
+current one. Assigning a ticket to an iteration is a separate, board-native step — via
+`--iteration` on `create`/`amend` — never part of the portable ticket record itself, the
+same way `status` is always trusted from the board rather than a stored copy.
 
 ### The local board
 

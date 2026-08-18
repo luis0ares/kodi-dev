@@ -188,3 +188,129 @@ export function fetchProjectMeta(
 export function optionIdFor(field: StatusField, columnName: string): string | undefined {
   return field.options.find((o) => o.name.toLowerCase() === columnName.toLowerCase())?.id;
 }
+
+/**
+ * A Projects v2 "Iteration" field's identity — id + name. Unlike a
+ * single-select field, `gh project field-list` does NOT inline this field's
+ * iterations catalog (confirmed against a real project with one configured);
+ * getting the catalog needs a separate GraphQL call keyed by this id (see
+ * {@link fetchIterationConfiguration}).
+ */
+export interface IterationFieldRef {
+  id: string;
+  name: string;
+}
+
+/** Parse `gh project field-list --format json`, returning the ITERATION-type field (or null). */
+export function parseIterationField(json: string): IterationFieldRef | null {
+  const data = JSON.parse(json);
+  const fields: any[] = Array.isArray(data) ? data : (data.fields ?? []);
+  const field = fields.find((f) => f?.type === 'ProjectV2IterationField');
+  if (!field || typeof field.id !== 'string' || typeof field.name !== 'string') return null;
+  return { id: field.id, name: field.name };
+}
+
+/** Fetch a board's Iteration field (proxy `gh project field-list`). Returns null when absent. */
+export function listIterationField(
+  owner: string,
+  number: number,
+  run: Runner = defaultRunner,
+): IterationFieldRef | null {
+  const out = run([
+    'gh',
+    'project',
+    'field-list',
+    String(number),
+    '--owner',
+    owner,
+    '--format',
+    'json',
+    '--limit',
+    '100',
+  ]);
+  return parseIterationField(out);
+}
+
+/** One sprint in an Iteration field's catalog. `duration` is in DAYS. */
+export interface IterationValue {
+  id: string;
+  title: string;
+  startDate: string;
+  duration: number;
+}
+
+/** An Iteration field's full catalog: not-yet-completed (current+future) and completed sprints. */
+export interface IterationCatalog {
+  iterations: IterationValue[];
+  completedIterations: IterationValue[];
+}
+
+/** Parse the `gh api graphql` iteration-configuration response (see {@link fetchIterationConfiguration}). */
+export function parseIterationConfiguration(json: string): IterationCatalog {
+  const config = JSON.parse(json)?.data?.node?.configuration ?? {};
+  const toValues = (arr: unknown): IterationValue[] =>
+    (Array.isArray(arr) ? arr : [])
+      .map((v: any) => ({
+        id: v?.id,
+        title: v?.title,
+        startDate: v?.startDate,
+        duration: v?.duration,
+      }))
+      .filter(
+        (v): v is IterationValue =>
+          typeof v.id === 'string' &&
+          typeof v.title === 'string' &&
+          typeof v.startDate === 'string' &&
+          typeof v.duration === 'number',
+      );
+  return {
+    iterations: toValues(config.iterations),
+    completedIterations: toValues(config.completedIterations),
+  };
+}
+
+/**
+ * Fetch an Iteration field's full catalog via GraphQL (proxy `gh api graphql`)
+ * — the ONLY way to resolve iteration names/ids, since `field-list` doesn't
+ * carry them for this field type. Verified live against a real
+ * `ProjectV2IterationField`.
+ */
+export function fetchIterationConfiguration(
+  fieldId: string,
+  run: Runner = defaultRunner,
+): IterationCatalog {
+  const query =
+    'query($id: ID!) { node(id: $id) { ... on ProjectV2IterationField { configuration { ' +
+    'iterations { id title startDate duration } completedIterations { id title startDate duration } } } } }';
+  return parseIterationConfiguration(
+    run(['gh', 'api', 'graphql', '-f', `query=${query}`, '-f', `id=${fieldId}`]),
+  );
+}
+
+/**
+ * The iteration whose `[startDate, startDate + duration)` window contains
+ * `now` — only among not-yet-completed iterations (a completed one is never
+ * "current" by definition). `now` is epoch ms, matching this codebase's
+ * `now?: () => number` convention (src/update-check.ts), not `() => Date`.
+ */
+export function currentIteration(
+  catalog: IterationCatalog,
+  now: () => number = Date.now,
+): IterationValue | undefined {
+  const t = now();
+  return catalog.iterations.find((it) => {
+    const start = new Date(it.startDate).getTime();
+    return t >= start && t < start + it.duration * 86_400_000;
+  });
+}
+
+/** Find an iteration by title (case-insensitive), searching both current/future and completed. */
+export function iterationByTitle(
+  catalog: IterationCatalog,
+  title: string,
+): IterationValue | undefined {
+  const needle = title.toLowerCase();
+  return [...catalog.iterations, ...catalog.completedIterations].find(
+    (it) => it.title.toLowerCase() === needle,
+  );
+}

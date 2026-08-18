@@ -35,6 +35,7 @@ import {
 } from './status-index.js';
 import { readyFromActive } from './ready.js';
 import type {
+  Iteration,
   ListOptions,
   ReadyResult,
   StartProvenance,
@@ -43,6 +44,8 @@ import type {
 } from './types.js';
 
 const FRONTMATTER = /^---\n([\s\S]*?)\n---\n?/;
+
+const NO_ITERATIONS_MESSAGE = 'the local provider does not support iterations/sprints';
 
 /**
  * Retired legacy layout folders (ADR-0001 §2.2). These are NOT part of
@@ -322,6 +325,11 @@ export class LocalTicketProvider implements TicketProvider {
   }
 
   async list(opts?: ListOptions): Promise<TicketRef[]> {
+    // An explicit ask for a named iteration is a real mistake worth surfacing —
+    // silently ignoring it would look like filtering happened when it didn't.
+    // `allIterations` (asking to disable a filter that was never applied) is
+    // harmless and stays a no-op.
+    if (opts?.iteration) throw new Error(NO_ITERATIONS_MESSAGE);
     const refs = this.collectRefs();
     // Local reads cost nothing, but the CLI surface stays identical across
     // providers: `tickets list` means open work everywhere, `--all` adds Done.
@@ -378,6 +386,14 @@ export class LocalTicketProvider implements TicketProvider {
     remove(doc, key);
     save(this.paths.statusYaml, doc);
     unlinkSync(found.path);
+  }
+
+  async listIterations(): Promise<Iteration[]> {
+    throw new Error(NO_ITERATIONS_MESSAGE);
+  }
+
+  async setIteration(_key: string, _iteration: string): Promise<StoredTicket> {
+    throw new Error(NO_ITERATIONS_MESSAGE);
   }
 }
 

@@ -271,3 +271,111 @@ export function listBoardColumns(
     ]),
   );
 }
+
+/**
+ * A team's iteration/sprint, as `az boards iteration team list` reports it.
+ * `path` is the full `System.IterationPath` value work items are filtered by
+ * (e.g. `"MyProject\Sprint 3"`); `name` is just the leaf segment. `timeFrame`
+ * is Azure's own classification (`'current' | 'past' | 'future'`, lowercase).
+ */
+export interface AzureIteration {
+  id: string;
+  name: string;
+  path: string;
+  startDate?: string;
+  finishDate?: string;
+  timeFrame?: string;
+}
+
+/**
+ * Parse `az boards iteration team list -o json`. `startDate`/`finishDate` come
+ * back as JSON `null` (not omitted) when unset — mapped to `undefined` here so
+ * callers can use `??` without worrying about the distinction.
+ */
+export function parseIterations(json: string): AzureIteration[] {
+  const d = JSON.parse(json);
+  const items: any[] = Array.isArray(d) ? d : (d.value ?? []);
+  const out: AzureIteration[] = [];
+  for (const i of items) {
+    if (typeof i?.id !== 'string' || typeof i?.name !== 'string' || typeof i?.path !== 'string')
+      continue;
+    out.push({
+      id: i.id,
+      name: i.name,
+      path: i.path,
+      startDate: i?.attributes?.startDate ?? undefined,
+      finishDate: i?.attributes?.finishDate ?? undefined,
+      timeFrame: i?.attributes?.timeFrame ?? undefined,
+    });
+  }
+  return out;
+}
+
+/**
+ * List a team's iterations (proxy `az boards iteration team list`). Omitting
+ * `timeframe` lists every iteration (past/current/future) — what `kodi tickets
+ * iterations` needs; `'Current'` narrows server-side to just the active one(s)
+ * — what the default (unflagged) listing filter needs.
+ */
+export function listTeamIterations(
+  org: string,
+  project: string,
+  team: string,
+  run: Runner = defaultRunner,
+  timeframe?: 'Current',
+): AzureIteration[] {
+  const args = [
+    'az',
+    'boards',
+    'iteration',
+    'team',
+    'list',
+    '--org',
+    org,
+    '--project',
+    project,
+    '--team',
+    team,
+    '--output',
+    'json',
+  ];
+  if (timeframe) args.push('--timeframe', timeframe);
+  return parseIterations(run(args));
+}
+
+/**
+ * Parse `az boards iteration team show-backlog-iteration -o json` into the
+ * team's backlog/root iteration name — what an unscheduled work item's
+ * `System.IterationPath` actually equals. NOT assumed to equal the project
+ * name (a team can rename the root iteration node).
+ */
+export function parseBacklogIterationName(json: string): string | undefined {
+  const name = JSON.parse(json)?.backlogIteration?.name;
+  return typeof name === 'string' ? name : undefined;
+}
+
+/** Fetch a team's backlog/root iteration name (proxy `az boards iteration team show-backlog-iteration`). */
+export function backlogIterationName(
+  org: string,
+  project: string,
+  team: string,
+  run: Runner = defaultRunner,
+): string | undefined {
+  return parseBacklogIterationName(
+    run([
+      'az',
+      'boards',
+      'iteration',
+      'team',
+      'show-backlog-iteration',
+      '--org',
+      org,
+      '--project',
+      project,
+      '--team',
+      team,
+      '--output',
+      'json',
+    ]),
+  );
+}

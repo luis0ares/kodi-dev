@@ -6,6 +6,23 @@ export interface TicketRef {
   status: TicketStatus;
   slug: string;
   dependencies: string[];
+  /** Provider-native iteration/sprint name, when the provider supports iterations
+   * (azure/github) and the ticket has one assigned. Always undefined for local. */
+  iteration?: string;
+}
+
+/**
+ * One iteration/sprint on a board that supports them (azure/github only).
+ * `id` is the provider-native identifier — Azure's full iteration path
+ * (`"Proj\Sprint 3"`), GitHub's iteration node id — while `name` is what a
+ * human types back on the CLI (`--iteration <name>`).
+ */
+export interface Iteration {
+  id: string;
+  name: string;
+  startDate?: string;
+  endDate?: string;
+  current: boolean;
 }
 
 /**
@@ -21,6 +38,15 @@ export interface TicketRef {
  */
 export interface ListOptions {
   includeDone?: boolean;
+  /**
+   * Restrict to one named iteration/sprint (azure/github only — see
+   * {@link TicketProvider.listIterations}). Omitted defaults to the CURRENT
+   * iteration plus anything not yet scheduled into any iteration; the local
+   * provider throws if this is set (it has no iteration concept).
+   */
+  iteration?: string;
+  /** Disable iteration filtering entirely — every ticket regardless of sprint. */
+  allIterations?: boolean;
 }
 
 export interface ReadyResult {
@@ -44,7 +70,7 @@ export interface TicketProvider {
   /** Compute the next `PREFIX-NNN` key. */
   nextId(prefix?: string): Promise<string>;
   create(input: Ticket): Promise<StoredTicket>;
-  get(key: string): Promise<StoredTicket | null>;
+  get(key: string): Promise<(StoredTicket & { iteration?: string }) | null>;
   /** Board listing; Done is excluded unless {@link ListOptions.includeDone}. */
   list(opts?: ListOptions): Promise<TicketRef[]>;
   listReady(): Promise<ReadyResult>;
@@ -53,6 +79,15 @@ export interface TicketProvider {
   /** Patch a ticket's editable fields (summary, criteria, deps, prUrl, …). */
   amend(key: string, patch: Partial<Ticket>): Promise<StoredTicket>;
   delete(key: string): Promise<void>;
+  /** List every iteration/sprint (azure/github only). Throws on the local
+   * provider, or on azure/github when iterations aren't configured at all
+   * (no team, or no Iteration field) — this is always an explicit ask. */
+  listIterations(): Promise<Iteration[]>;
+  /** Assign a ticket to a named iteration (azure/github only) — board-native
+   * metadata, deliberately outside `create`/`amend`'s `Ticket` patch so it
+   * never rides inside the portable marker (see status's identical rule:
+   * the board's real value always wins over anything embedded there). */
+  setIteration(key: string, iteration: string): Promise<StoredTicket & { iteration?: string }>;
 }
 
 /** A doc artifact's identity, without its body — cheap to list in bulk. */

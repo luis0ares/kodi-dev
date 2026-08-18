@@ -1,4 +1,9 @@
-import { DEFAULT_DOC_TYPES, loadBoardConfig, type BoardConfig, type DocsProviderName } from '../config.js';
+import {
+  DEFAULT_DOC_TYPES,
+  loadBoardConfig,
+  type BoardConfig,
+  type DocsProviderName,
+} from '../config.js';
 import { AzureWikiDocsProvider } from './azure-wiki-docs.js';
 import { AzureTicketProvider } from './azure.js';
 import { GithubTicketProvider } from './github.js';
@@ -34,6 +39,7 @@ export function resolveProvider(cwd = process.cwd(), opts: ResolveOptions = {}):
       return new AzureTicketProvider({
         organization: cfg.organization,
         project: cfg.project,
+        team: cfg.team,
         columns: cfg.columns,
         columnStates: cfg.columnStates,
         dryRun: !opts.yes,

@@ -6,19 +6,26 @@ import {
   DEFAULT_COLUMNS,
   itemAddArgs,
   itemEditArgs,
+  itemEditIterationArgs,
   itemsToHydrate,
+  iterationValueFromRaw,
   parseItems,
   parseMarker,
   serializeBody,
   statusFromColumn,
 } from '../src/providers/github.js';
 import {
+  currentIteration,
+  iterationByTitle,
   listBranches,
   optionIdFor,
   parseBranchLines,
+  parseIterationConfiguration,
+  parseIterationField,
   parseProjects,
   parseRepos,
   parseStatusField,
+  type IterationCatalog,
 } from '../src/providers/github-discovery.js';
 import { TicketSchema, type StoredTicket } from '../src/templates/ticket.js';
 
@@ -242,5 +249,140 @@ describe('github discovery — parsing', () => {
     expect(
       parseRepos(JSON.stringify([{ nameWithOwner: 'acme/app' }, { nameWithOwner: 'acme/api' }])),
     ).toEqual(['acme/app', 'acme/api']);
+  });
+});
+
+describe('github discovery — iteration field', () => {
+  it('finds the ITERATION-type field among field-list output (live-verified shape: no inline catalog)', () => {
+    const field = parseIterationField(
+      JSON.stringify({
+        fields: [
+          { id: 'PVTF_title', name: 'Title', type: 'ProjectV2Field' },
+          { id: 'PVTIF_x', name: 'Iteration', type: 'ProjectV2IterationField' },
+        ],
+      }),
+    );
+    expect(field).toEqual({ id: 'PVTIF_x', name: 'Iteration' });
+  });
+
+  it('returns null when the project has no Iteration field (a Status-only project)', () => {
+    expect(
+      parseIterationField(
+        JSON.stringify({
+          fields: [{ id: 'PVTSSF_status', name: 'Status', type: 'ProjectV2SingleSelectField' }],
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('parses the gh api graphql iteration-configuration response (live-verified shape)', () => {
+    const catalog = parseIterationConfiguration(
+      JSON.stringify({
+        data: {
+          node: {
+            configuration: {
+              iterations: [
+                { id: 'it_2', title: 'Sprint 2', startDate: '2026-01-13', duration: 14 },
+              ],
+              completedIterations: [
+                { id: 'it_1', title: 'Sprint 1', startDate: '2025-12-30', duration: 14 },
+              ],
+            },
+          },
+        },
+      }),
+    );
+    expect(catalog).toEqual({
+      iterations: [{ id: 'it_2', title: 'Sprint 2', startDate: '2026-01-13', duration: 14 }],
+      completedIterations: [
+        { id: 'it_1', title: 'Sprint 1', startDate: '2025-12-30', duration: 14 },
+      ],
+    });
+  });
+
+  const catalog: IterationCatalog = {
+    iterations: [{ id: 'it_2', title: 'Sprint 2', startDate: '2026-01-13', duration: 14 }],
+    completedIterations: [{ id: 'it_1', title: 'Sprint 1', startDate: '2025-12-30', duration: 14 }],
+  };
+
+  it('currentIteration: a date inside [start, start+duration) matches', () => {
+    const inside = new Date('2026-01-20T00:00:00Z').getTime();
+    expect(currentIteration(catalog, () => inside)?.title).toBe('Sprint 2');
+  });
+
+  it('currentIteration: the boundary at start+duration does NOT match (exclusive end)', () => {
+    const boundary = new Date('2026-01-27T00:00:00Z').getTime(); // 2026-01-13 + 14 days
+    expect(currentIteration(catalog, () => boundary)).toBeUndefined();
+  });
+
+  it('currentIteration: no iteration covers the date → undefined', () => {
+    const farFuture = new Date('2030-01-01T00:00:00Z').getTime();
+    expect(currentIteration(catalog, () => farFuture)).toBeUndefined();
+  });
+
+  it('iterationByTitle: case-insensitive, searches both current/future and completed', () => {
+    expect(iterationByTitle(catalog, 'sprint 2')?.id).toBe('it_2');
+    expect(iterationByTitle(catalog, 'SPRINT 1')?.id).toBe('it_1'); // completed, still found
+    expect(iterationByTitle(catalog, 'Sprint 99')).toBeUndefined();
+  });
+});
+
+describe('github provider — per-item iteration value', () => {
+  it('reads the value keyed by the field name, gh-camelCased (first char only, NOT full lowercase)', () => {
+    const raw = {
+      iteration: { title: 'Sprint 3', startDate: '2026-01-27', duration: 14, iterationId: 'it_3' },
+    };
+    expect(iterationValueFromRaw(raw, 'Iteration')).toEqual({
+      title: 'Sprint 3',
+      startDate: '2026-01-27',
+      duration: 14,
+      iterationId: 'it_3',
+    });
+  });
+
+  it('regression: a multi-capital field name only lowercases its FIRST character', () => {
+    // gh's camelCase("StoryPoints") -> "storyPoints", NOT "storypoints" — a naive
+    // .toLowerCase() key would read undefined here even though the value exists.
+    const raw = {
+      storyPoints: {
+        title: 'Sprint 4',
+        startDate: '2026-02-10',
+        duration: 14,
+        iterationId: 'it_4',
+      },
+    };
+    expect(iterationValueFromRaw(raw, 'StoryPoints')?.title).toBe('Sprint 4');
+  });
+
+  it('returns undefined when the item has no value for that field (key absent)', () => {
+    expect(iterationValueFromRaw({}, 'Iteration')).toBeUndefined();
+    expect(iterationValueFromRaw(undefined, 'Iteration')).toBeUndefined();
+  });
+
+  it('builds the item-edit args with --iteration-id', () => {
+    expect(itemEditIterationArgs('PVT_1', 'PVTI_2', 'PVTIF_3', 'it_4')).toEqual([
+      'gh',
+      'project',
+      'item-edit',
+      '--id',
+      'PVTI_2',
+      '--project-id',
+      'PVT_1',
+      '--field-id',
+      'PVTIF_3',
+      '--iteration-id',
+      'it_4',
+    ]);
+  });
+
+  it('parseItems stashes the raw per-item object, round-tripping the original', () => {
+    const rawItem = {
+      id: 'PVTI_a',
+      status: 'Todo',
+      iteration: { title: 'Sprint 3' },
+      content: { type: 'Issue', number: 7, body: '<!-- kodi:ticket {} -->' },
+    };
+    const items = parseItems(JSON.stringify({ items: [rawItem] }));
+    expect(items[0].raw).toEqual(rawItem);
   });
 });

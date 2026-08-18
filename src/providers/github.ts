@@ -9,9 +9,21 @@ import {
   type Ticket,
   type TicketStatus,
 } from '../templates/ticket.js';
-import { fetchProjectMeta, optionIdFor, type ProjectMeta } from './github-discovery.js';
+import {
+  currentIteration,
+  fetchIterationConfiguration,
+  fetchProjectMeta,
+  iterationByTitle,
+  listIterationField,
+  optionIdFor,
+  type IterationCatalog,
+  type IterationFieldRef,
+  type IterationValue,
+  type ProjectMeta,
+} from './github-discovery.js';
 import { readyFromActive } from './ready.js';
 import type {
+  Iteration,
   ListOptions,
   ReadyResult,
   StartProvenance,
@@ -81,6 +93,12 @@ export interface ProjectItem {
   issueNumber: number;
   statusName?: string;
   body?: string;
+  /** The item's raw `item-list` object — every field value `gh` returned for
+   * it, unparsed. Custom fields (like an Iteration field) are read from here
+   * lazily, once the field's own name is known (see {@link iterationValueFromRaw}) —
+   * `gh` already fetches every field's value per item unconditionally, so no
+   * extra API call is needed. */
+  raw: Record<string, unknown>;
 }
 
 /** Parse `gh project item-list --format json`, keeping only issue items. */
@@ -101,9 +119,64 @@ export function parseItems(json: string): ProjectItem[] {
       issueNumber: content.number,
       statusName: typeof it?.status === 'string' ? it.status : undefined,
       body: typeof content.body === 'string' ? content.body : undefined,
+      raw: it,
     });
   }
   return out;
+}
+
+/** A per-item `ProjectV2ItemFieldIterationValue`, as `gh project item-list` serializes it —
+ * an OBJECT, unlike a single-select field's flat string value. */
+export interface RawIterationValue {
+  title: string;
+  startDate: string;
+  duration: number;
+  iterationId: string;
+}
+
+/**
+ * Read a custom field's raw value off an item, keyed by the field's own
+ * (`gh`-camelCased) name — `gh` only lowercases the FIRST character
+ * (`"Iteration"` → `iteration`, but `"StoryPoints"` → `storyPoints`, not
+ * `storypoints`), so this must NOT be a full `.toLowerCase()`.
+ */
+export function iterationValueFromRaw(
+  raw: Record<string, unknown> | undefined,
+  fieldName: string,
+): RawIterationValue | undefined {
+  if (!raw || !fieldName) return undefined;
+  const key = fieldName[0].toLowerCase() + fieldName.slice(1);
+  const v = raw[key] as any;
+  if (!v || typeof v !== 'object') return undefined;
+  if (typeof v.title !== 'string') return undefined;
+  return {
+    title: v.title,
+    startDate: typeof v.startDate === 'string' ? v.startDate : '',
+    duration: typeof v.duration === 'number' ? v.duration : 0,
+    iterationId: typeof v.iterationId === 'string' ? v.iterationId : '',
+  };
+}
+
+/** `gh project item-edit --iteration-id` — assigns an item to a specific iteration/sprint. */
+export function itemEditIterationArgs(
+  projectId: string,
+  itemId: string,
+  fieldId: string,
+  iterationId: string,
+): string[] {
+  return [
+    'gh',
+    'project',
+    'item-edit',
+    '--id',
+    itemId,
+    '--project-id',
+    projectId,
+    '--field-id',
+    fieldId,
+    '--iteration-id',
+    iterationId,
+  ];
 }
 
 /**
@@ -185,6 +258,9 @@ export class GithubTicketProvider implements TicketProvider {
   private readonly columns: ColumnMap;
   private meta?: ProjectMeta;
   private itemsCache?: ProjectItem[];
+  /** `undefined` = not yet resolved; `null` = resolved to "no such field/catalog". */
+  private iterationFieldCache?: IterationFieldRef | null;
+  private iterationCatalogCache?: IterationCatalog | null;
 
   constructor(
     private readonly opts: {
@@ -206,6 +282,59 @@ export class GithubTicketProvider implements TicketProvider {
   /** Resolve (and cache) the project + Status field node ids needed for writes. */
   private projectMeta(): ProjectMeta {
     return (this.meta ??= fetchProjectMeta(this.opts.owner, this.opts.number));
+  }
+
+  /** Resolve (and cache) the board's Iteration field, if it has one. */
+  private iterationField(): IterationFieldRef | null {
+    if (this.iterationFieldCache === undefined) {
+      this.iterationFieldCache = listIterationField(this.opts.owner, this.opts.number);
+    }
+    return this.iterationFieldCache;
+  }
+
+  /** Resolve (and cache) the Iteration field's full catalog, if it has one. */
+  private iterationCatalog(): IterationCatalog | null {
+    if (this.iterationCatalogCache === undefined) {
+      const field = this.iterationField();
+      this.iterationCatalogCache = field ? fetchIterationConfiguration(field.id) : null;
+    }
+    return this.iterationCatalogCache;
+  }
+
+  /**
+   * Resolve a named iteration's title (case-insensitive). Throws when the
+   * project has no Iteration field at all, or the name matches nothing — an
+   * explicit ask (`--iteration <name>` filtering, or `setIteration`), where a
+   * silent fallback would be wrong.
+   */
+  private resolveIterationTitle(name: string): string {
+    const catalog = this.iterationCatalog();
+    if (!catalog) {
+      throw new Error(
+        `project #${this.opts.number} (owner ${this.opts.owner}) has no Iteration field`,
+      );
+    }
+    const match = iterationByTitle(catalog, name);
+    if (!match) {
+      const available =
+        [...catalog.iterations, ...catalog.completedIterations].map((i) => i.title).join(', ') ||
+        '(none configured)';
+      throw new Error(`no iteration named "${name}" (available: ${available})`);
+    }
+    return match.title;
+  }
+
+  /**
+   * Best-effort resolution of the current iteration's title, for the default
+   * listing filter. Returns undefined — degrading the default listing to "no
+   * iteration filter" — when the project has no Iteration field, or none of
+   * its iterations covers today. Mirrors Azure's identical graceful-default
+   * policy: only an explicit ask ever throws.
+   */
+  private defaultIterationTitle(): string | undefined {
+    const catalog = this.iterationCatalog();
+    if (!catalog) return undefined;
+    return currentIteration(catalog)?.title;
   }
 
   /** Read (and cache) all board items in one call. */
@@ -247,11 +376,19 @@ export class GithubTicketProvider implements TicketProvider {
     return item.statusName ? statusFromColumn(item.statusName, this.columns) : undefined;
   }
 
-  private toStored(item: ProjectItem): StoredTicket | null {
+  private toStored(item: ProjectItem): (StoredTicket & { iteration?: string }) | null {
     const t = parseMarker(this.bodyFor(item));
     if (!t) return null;
     const status = this.columnStatus(item) ?? t.status;
-    return { ...t, key: String(item.issueNumber), slug: t.slug ?? slugify(t.title), status };
+    const field = this.iterationField();
+    const iteration = field ? iterationValueFromRaw(item.raw, field.name)?.title : undefined;
+    return {
+      ...t,
+      key: String(item.issueNumber),
+      slug: t.slug ?? slugify(t.title),
+      status,
+      ...(iteration ? { iteration } : {}),
+    };
   }
 
   async nextId(): Promise<string> {
@@ -295,18 +432,35 @@ export class GithubTicketProvider implements TicketProvider {
     return { ...draft, key: num };
   }
 
-  async get(key: string): Promise<StoredTicket | null> {
+  async get(key: string): Promise<(StoredTicket & { iteration?: string }) | null> {
     const item = this.items().find((i) => String(i.issueNumber) === key);
     return item ? this.toStored(item) : null;
   }
 
   async list(opts?: ListOptions): Promise<TicketRef[]> {
+    // Resolve the iteration filter ONCE, up front: undefined means "no filter"
+    // (either --all-iterations, or the default gracefully degrading because
+    // there's no Iteration field / no current sprint) — `--iteration <name>`
+    // resolves strictly and throws if it doesn't match anything.
+    let filter: { title: string; includeUnscheduled: boolean } | undefined;
+    if (!opts?.allIterations) {
+      if (opts?.iteration) {
+        filter = { title: this.resolveIterationTitle(opts.iteration), includeUnscheduled: false };
+      } else {
+        const title = this.defaultIterationTitle();
+        if (title) filter = { title, includeUnscheduled: true };
+      }
+    }
     const refs: TicketRef[] = [];
     for (const item of itemsToHydrate(this.items(), this.columns, opts?.includeDone)) {
       const t = this.toStored(item);
       if (!t) continue;
       // An item with no Status column yet is only classifiable after hydration.
       if (!opts?.includeDone && t.status === 'Done') continue;
+      if (filter) {
+        const matches = t.iteration === filter.title || (filter.includeUnscheduled && !t.iteration);
+        if (!matches) continue;
+      }
       refs.push(toRef(t));
     }
     return refs;
@@ -354,15 +508,60 @@ export class GithubTicketProvider implements TicketProvider {
   async delete(key: string): Promise<void> {
     execMutate(['gh', 'issue', 'delete', key, '--yes', ...this.repoArgs()], this.opts.dryRun);
   }
+
+  async listIterations(): Promise<Iteration[]> {
+    const catalog = this.iterationCatalog();
+    if (!catalog) {
+      throw new Error(
+        `project #${this.opts.number} (owner ${this.opts.owner}) has no Iteration field`,
+      );
+    }
+    const current = currentIteration(catalog);
+    const toIteration = (v: IterationValue): Iteration => {
+      const start = new Date(v.startDate).getTime();
+      // Match startDate's plain YYYY-MM-DD shape (the GitHub API's own format) —
+      // not a full ISO timestamp, which would read inconsistently next to it.
+      const end = new Date(start + v.duration * 86_400_000).toISOString().slice(0, 10);
+      return {
+        id: v.id,
+        name: v.title,
+        startDate: v.startDate,
+        endDate: end,
+        current: v.id === current?.id,
+      };
+    };
+    return [...catalog.iterations, ...catalog.completedIterations].map(toIteration);
+  }
+
+  async setIteration(
+    key: string,
+    iteration: string,
+  ): Promise<StoredTicket & { iteration?: string }> {
+    const title = this.resolveIterationTitle(iteration);
+    const catalog = this.iterationCatalog()!; // resolveIterationTitle already proved this is non-null
+    const value = iterationByTitle(catalog, title)!;
+    const item = this.items().find((i) => String(i.issueNumber) === key);
+    if (!item) throw new Error(`issue ${key} is not on project #${this.opts.number}`);
+    const current = this.toStored(item);
+    if (!current) throw new Error(`issue ${key} has no kodi marker`);
+    const field = this.iterationField()!;
+    const meta = this.projectMeta();
+    execMutate(
+      itemEditIterationArgs(meta.projectId, item.itemId, field.id, value.id),
+      this.opts.dryRun,
+    );
+    return { ...current, iteration: title };
+  }
 }
 
-function toRef(t: StoredTicket): TicketRef {
+function toRef(t: StoredTicket & { iteration?: string }): TicketRef {
   return {
     key: t.key,
     title: t.title,
     status: t.status,
     slug: t.slug,
     dependencies: t.dependencies,
+    ...(t.iteration ? { iteration: t.iteration } : {}),
   };
 }
 

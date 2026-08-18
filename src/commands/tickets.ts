@@ -98,6 +98,7 @@ export function registerTicketsCommand(program: Command) {
     .option('--adr <ref>', 'ADR driver (repeatable)', collect, [])
     .option('--security <ref>', 'security driver')
     .option('--notes <text>')
+    .option('--iteration <name>', 'assign to an iteration/sprint (azure/github only)')
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (o) => {
@@ -105,8 +106,21 @@ export function registerTicketsCommand(program: Command) {
       const provider = resolveProvider(process.cwd(), { yes: o.yes });
       await warnUnknownDependencies(provider, draft.dependencies);
       try {
-        const created = await provider.create(draft);
-        out(created, o.json, () => `Created ${created.key} (${created.status}) — ${created.title}`);
+        let created: Awaited<ReturnType<typeof provider.create>> & { iteration?: string } =
+          await provider.create(draft);
+        // Iteration is board-native (see setIteration's doc) — assigned as a
+        // separate step, never through create()'s Ticket draft. Skipped for a
+        // dry-run preview (created.key is the '(dry-run)' placeholder, which
+        // no provider can actually resolve/mutate against).
+        if (o.iteration && created.key !== '(dry-run)') {
+          created = await provider.setIteration(created.key, o.iteration);
+        }
+        out(created, o.json, () => {
+          const line = `Created ${created.key} (${created.status}) — ${created.title}`;
+          return o.iteration && created.key === '(dry-run)'
+            ? `${line}\n(would assign iteration "${o.iteration}" — skipped in dry-run)`
+            : line;
+        });
       } catch (err) {
         // Clean-start hard stop (ADR-0001 §2.6): render the refusal on BOTH the
         // human and structured `--json` surfaces via out(), then exit non-zero.
@@ -125,16 +139,52 @@ export function registerTicketsCommand(program: Command) {
     .command('list')
     .description('List open tickets (Done is fetched only with --all)')
     .option('-a, --all', 'include the Done column', false)
+    .option(
+      '--iteration <name>',
+      'list one iteration/sprint instead of the current one (azure/github only)',
+    )
+    .option(
+      '--all-iterations',
+      'disable iteration filtering — list tickets from every sprint (azure/github only)',
+      false,
+    )
     .option('--json', 'machine-readable output', false)
     .action(async (o) => {
-      const refs = await resolveProvider().list({ includeDone: o.all });
+      const refs = await resolveProvider().list({
+        includeDone: o.all,
+        iteration: o.iteration,
+        allIterations: o.allIterations,
+      });
       out(refs, o.json, () => {
         const body = refs.length
-          ? refs.map((t) => `${t.key}  ${t.status.padEnd(12)}  ${t.title}`).join('\n')
+          ? refs
+              .map(
+                (t) =>
+                  `${t.key}  ${t.status.padEnd(12)}  ${t.title}${t.iteration ? `  [${t.iteration}]` : ''}`,
+              )
+              .join('\n')
           : 'No tickets.';
         // Say what is missing, or an empty-looking board reads as an empty board.
         return o.all ? body : `${body}\n(Done tickets not fetched — pass --all)`;
       });
+    });
+
+  tickets
+    .command('iterations')
+    .description('List all iterations/sprints (azure/github only)')
+    .option('--json', 'machine-readable output', false)
+    .action(async (o) => {
+      const its = await resolveProvider().listIterations();
+      out(its, o.json, () =>
+        its.length
+          ? its
+              .map(
+                (i) =>
+                  `${i.current ? '* ' : '  '}${i.name}${i.startDate ? `  (${i.startDate} → ${i.endDate ?? '?'})` : ''}`,
+              )
+              .join('\n')
+          : 'No iterations.',
+      );
     });
 
   tickets
@@ -277,6 +327,7 @@ export function registerTicketsCommand(program: Command) {
     .option('--ac <criterion>', 'replace acceptance criteria (repeatable)', collect, [])
     .option('--dep <key>', 'replace dependencies (repeatable)', collect, [])
     .option('--pr <ref>', 'link a PR')
+    .option('--iteration <name>', 'assign to an iteration/sprint (azure/github only)')
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
@@ -287,7 +338,20 @@ export function registerTicketsCommand(program: Command) {
       if (patch.dependencies) patch.dependencies = patch.dependencies.map(canonicalizeTicketKey);
       const provider = resolveProvider(process.cwd(), { yes: o.yes });
       if (patch.dependencies) await warnUnknownDependencies(provider, patch.dependencies);
-      const t = await provider.amend(key, patch);
+      // Iteration is board-native (see setIteration's doc) — never rides in the
+      // Ticket patch. `--iteration` alone skips amend() entirely (no point
+      // re-writing the ticket record for a purely board-native change); both
+      // together apply the patch first, then the iteration, printing the latter.
+      const hasPatch = Boolean(o.file) || Object.keys(patch).length > 0;
+      let t: Awaited<ReturnType<typeof provider.amend>> & { iteration?: string };
+      if (hasPatch) {
+        t = await provider.amend(key, patch);
+        if (o.iteration) t = await provider.setIteration(key, o.iteration);
+      } else if (o.iteration) {
+        t = await provider.setIteration(key, o.iteration);
+      } else {
+        t = await provider.amend(key, patch); // preserves today's behavior for a flagless amend
+      }
       out(t, o.json, () => `Amended ${t.key}`);
     });
 

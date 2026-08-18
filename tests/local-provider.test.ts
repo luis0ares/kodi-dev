@@ -431,3 +431,26 @@ describe('local provider — amend (content edit, placement unchanged)', () => {
     assertBijection();
   });
 });
+
+describe('local provider — no iteration/sprint concept', () => {
+  const NOT_SUPPORTED = 'the local provider does not support iterations/sprints';
+
+  it('listIterations() throws', async () => {
+    await expect(provider.listIterations()).rejects.toThrow(NOT_SUPPORTED);
+  });
+
+  it('setIteration() throws', async () => {
+    const t = await provider.create(draft());
+    await expect(provider.setIteration(t.key, 'Sprint 1')).rejects.toThrow(NOT_SUPPORTED);
+  });
+
+  it('list({ iteration }) throws — an explicit ask for something unsupported', async () => {
+    await expect(provider.list({ iteration: 'Sprint 1' })).rejects.toThrow(NOT_SUPPORTED);
+  });
+
+  it('list({ allIterations: true }) does not throw — disabling a filter that was never applied is a no-op', async () => {
+    await provider.create(draft({ title: 'Alpha' }));
+    const refs = await provider.list({ allIterations: true });
+    expect(refs).toHaveLength(1);
+  });
+});

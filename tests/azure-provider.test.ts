@@ -1,17 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import { mdToHtml } from '../src/html.js';
-import { listBranches, parseBranchRefs } from '../src/providers/azure-discovery.js';
+import {
+  backlogIterationName,
+  listBranches,
+  listTeamIterations,
+  parseBacklogIterationName,
+  parseBranchRefs,
+  parseIterations,
+} from '../src/providers/azure-discovery.js';
 import {
   columnForStatus,
   createArgs,
   DEFAULT_COLUMNS,
   descriptionHtml,
   kanbanColumnField,
+  leafIterationName,
   listWiql,
   moveFields,
   parseQueryOutput,
   parseSignedInUser,
   parseWorkItem,
+  scheduledIterationName,
   stateForColumn,
   updateArgs,
 } from '../src/providers/azure.js';
@@ -179,6 +188,45 @@ describe('azure provider — command construction', () => {
     expect(listWiql("O'Brien's Proj")).toContain("[System.TeamProject] = 'O''Brien''s Proj'");
   });
 
+  it('with no iteration param, no IterationPath filter clause is added (regression guard)', () => {
+    // Locks in today's behavior — the live-caught `@project`/`@CurrentIteration`
+    // macro bugs must never come back as a "helpful" default. IterationPath is
+    // still SELECTed (parseWorkItem needs it) — just never filtered on.
+    const wiql = listWiql('KodiTest', 'Done');
+    expect(wiql).not.toMatch(/WHERE.*IterationPath/);
+    expect(wiql).not.toContain('@project');
+    expect(wiql).not.toContain('@CurrentIteration');
+  });
+
+  it('always selects System.IterationPath (parseWorkItem needs it)', () => {
+    expect(listWiql()).toContain('[System.IterationPath]');
+  });
+
+  it('default filter (current + unscheduled): UNDER the current path OR the backlog name', () => {
+    const wiql = listWiql('KodiTest', undefined, {
+      path: 'KodiTest\\Sprint 1',
+      unscheduledName: 'KodiTest',
+    });
+    expect(wiql).toContain(
+      " AND ([System.IterationPath] UNDER 'KodiTest\\Sprint 1' OR [System.IterationPath] = 'KodiTest')",
+    );
+  });
+
+  it('one named iteration: UNDER only, no unscheduled OR', () => {
+    const wiql = listWiql('KodiTest', undefined, { path: 'KodiTest\\Sprint 2' });
+    expect(wiql).toContain(" AND [System.IterationPath] UNDER 'KodiTest\\Sprint 2'");
+    expect(wiql).not.toContain(' OR ');
+  });
+
+  it('escapes single quotes in the iteration path/unscheduled name', () => {
+    const wiql = listWiql(undefined, undefined, {
+      path: "O'Brien's Proj\\Sprint 1",
+      unscheduledName: "O'Brien's Proj",
+    });
+    expect(wiql).toContain("UNDER 'O''Brien''s Proj\\Sprint 1'");
+    expect(wiql).toContain("= 'O''Brien''s Proj'");
+  });
+
   it('discovers the writable per-board Kanban column field (the WEF_… field)', () => {
     const fields = {
       'System.State': 'Doing',
@@ -214,7 +262,10 @@ describe('azure provider — command construction', () => {
     // some accounts (guest/service) have no `mail` — fall back to the UPN.
     expect(
       parseSignedInUser(
-        JSON.stringify({ mail: null, userPrincipalName: 'dev_gmail.com#EXT#@acme.onmicrosoft.com' }),
+        JSON.stringify({
+          mail: null,
+          userPrincipalName: 'dev_gmail.com#EXT#@acme.onmicrosoft.com',
+        }),
       ),
     ).toBe('dev_gmail.com#EXT#@acme.onmicrosoft.com');
     expect(parseSignedInUser(JSON.stringify({}))).toBe('');
@@ -249,6 +300,162 @@ describe('azure provider — description round-trip', () => {
 
   it('returns null when there is no marker', () => {
     expect(parseWorkItem({ 'System.Description': '<p>plain</p>' }, 1)).toBeNull();
+  });
+
+  it('surfaces the leaf iteration name from System.IterationPath', () => {
+    const t = stored();
+    const desc = descriptionHtml(t);
+    const back = parseWorkItem(
+      {
+        'System.Description': desc,
+        'System.State': 'To Do',
+        'System.IterationPath': 'KodiTest\\Sprint 3',
+      },
+      7,
+    );
+    expect(back!.iteration).toBe('Sprint 3');
+  });
+
+  it('omits iteration for the bare project-root path (unscheduled)', () => {
+    const t = stored();
+    const desc = descriptionHtml(t);
+    const back = parseWorkItem(
+      {
+        'System.Description': desc,
+        'System.State': 'To Do',
+        'System.IterationPath': 'KodiTest',
+      },
+      7,
+    );
+    expect(back!.iteration).toBeUndefined();
+  });
+
+  it('omits iteration when the field is absent entirely', () => {
+    const t = stored();
+    const back = parseWorkItem(
+      { 'System.Description': descriptionHtml(t), 'System.State': 'To Do' },
+      7,
+    );
+    expect(back!.iteration).toBeUndefined();
+  });
+});
+
+describe('azure provider — iteration name helpers', () => {
+  it('leafIterationName takes the last backslash-separated segment', () => {
+    expect(leafIterationName('Proj\\Release 1\\Sprint 3')).toBe('Sprint 3');
+    expect(leafIterationName('Proj\\Sprint 3')).toBe('Sprint 3');
+    expect(leafIterationName('Proj')).toBe('Proj'); // no backslash → itself
+  });
+
+  it('scheduledIterationName is undefined for the bare root path, the leaf name otherwise', () => {
+    expect(scheduledIterationName('Proj\\Sprint 3')).toBe('Sprint 3');
+    expect(scheduledIterationName('Proj')).toBeUndefined();
+    expect(scheduledIterationName(undefined)).toBeUndefined();
+    expect(scheduledIterationName('')).toBeUndefined();
+  });
+});
+
+describe('azure discovery — iterations', () => {
+  it('parses az boards iteration team list output (live-verified shape)', () => {
+    const json = JSON.stringify([
+      {
+        attributes: { finishDate: null, startDate: null, timeFrame: 'current' },
+        id: 'abc-123',
+        name: 'Sprint 1',
+        path: 'KodiTest\\Sprint 1',
+        url: 'https://…',
+      },
+    ]);
+    const its = parseIterations(json);
+    expect(its).toEqual([
+      {
+        id: 'abc-123',
+        name: 'Sprint 1',
+        path: 'KodiTest\\Sprint 1',
+        startDate: undefined,
+        finishDate: undefined,
+        timeFrame: 'current',
+      },
+    ]);
+  });
+
+  it('maps JSON null start/finish dates to undefined, not the literal null', () => {
+    const its = parseIterations(
+      JSON.stringify([{ id: '1', name: 'S1', path: 'P\\S1', attributes: { startDate: null } }]),
+    );
+    expect(its[0].startDate).toBeUndefined();
+  });
+
+  it('also accepts the { value: [...] } wrapper shape (mirrors parseProjects/parseTeams)', () => {
+    const its = parseIterations(
+      JSON.stringify({ value: [{ id: '1', name: 'S1', path: 'P\\S1', attributes: {} }] }),
+    );
+    expect(its).toHaveLength(1);
+  });
+
+  it('filters out entries missing id/name/path', () => {
+    const its = parseIterations(JSON.stringify([{ id: '1', name: 'S1' /* no path */ }]));
+    expect(its).toEqual([]);
+  });
+
+  it('builds the team-iteration-list command, with --timeframe only when given', () => {
+    const args: string[][] = [];
+    const run = (a: string[]) => {
+      args.push(a);
+      return '[]';
+    };
+    listTeamIterations('https://dev.azure.com/acme', 'Proj', 'Proj Team', run);
+    expect(args[0]).toEqual([
+      'az',
+      'boards',
+      'iteration',
+      'team',
+      'list',
+      '--org',
+      'https://dev.azure.com/acme',
+      '--project',
+      'Proj',
+      '--team',
+      'Proj Team',
+      '--output',
+      'json',
+    ]);
+
+    listTeamIterations('https://dev.azure.com/acme', 'Proj', 'Proj Team', run, 'Current');
+    expect(args[1]).toContain('--timeframe');
+    expect(args[1]).toContain('Current');
+  });
+
+  it('parses the backlog/root iteration name from show-backlog-iteration output', () => {
+    expect(
+      parseBacklogIterationName(JSON.stringify({ backlogIteration: { name: 'KodiTest' } })),
+    ).toBe('KodiTest');
+    expect(parseBacklogIterationName(JSON.stringify({}))).toBeUndefined();
+  });
+
+  it('builds the show-backlog-iteration command', () => {
+    const args: string[][] = [];
+    const run = (a: string[]) => {
+      args.push(a);
+      return JSON.stringify({ backlogIteration: { name: 'KodiTest' } });
+    };
+    const name = backlogIterationName('https://dev.azure.com/acme', 'Proj', 'Proj Team', run);
+    expect(name).toBe('KodiTest');
+    expect(args[0]).toEqual([
+      'az',
+      'boards',
+      'iteration',
+      'team',
+      'show-backlog-iteration',
+      '--org',
+      'https://dev.azure.com/acme',
+      '--project',
+      'Proj',
+      '--team',
+      'Proj Team',
+      '--output',
+      'json',
+    ]);
   });
 });
 

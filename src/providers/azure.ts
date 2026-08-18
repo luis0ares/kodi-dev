@@ -10,8 +10,14 @@ import {
   type Ticket,
   type TicketStatus,
 } from '../templates/ticket.js';
+import {
+  backlogIterationName,
+  listTeamIterations,
+  type AzureIteration,
+} from './azure-discovery.js';
 import { readyFromActive } from './ready.js';
 import type {
+  Iteration,
   ListOptions,
   ReadyResult,
   StartProvenance,
@@ -61,6 +67,22 @@ function wiqlLiteral(value: string): string {
 }
 
 /**
+ * How a listing should be scoped by iteration/sprint. Omitted (the third
+ * `listWiql` param itself being `undefined`) means "no iteration filter at
+ * all" — today's behavior, and what `--all-iterations` asks for explicitly.
+ * `{ path, unscheduledName }` is the default (current + unscheduled) filter;
+ * pass `unscheduledName: undefined` for a single named-iteration filter with
+ * no unscheduled OR clause.
+ */
+export interface IterationFilter {
+  /** The exact `System.IterationPath` to match (and everything under it). */
+  path: string;
+  /** Also include tickets whose IterationPath equals this (the team's
+   * backlog/root iteration name) — omit for a single-iteration-only filter. */
+  unscheduledName?: string;
+}
+
+/**
  * The WIQL that hydrates the board in one query. The project is pinned via
  * `[System.TeamProject]` because `az boards query` does NOT honour `--project` —
  * it runs the WIQL across the whole ORGANIZATION, so without this filter a
@@ -76,13 +98,33 @@ function wiqlLiteral(value: string): string {
  * mirror is empty for a card not yet placed, and in WIQL a `<>` comparison drops
  * empty-valued rows, which would silently hide brand-new tickets. Columns sharing
  * one state are then separated client-side, where the column IS authoritative.
+ *
+ * `iteration` filters by `System.IterationPath` — deliberately built from
+ * RESOLVED LITERAL VALUES, never a WIQL macro. `@project` and `@CurrentIteration`
+ * were both live-tested against a real Azure DevOps project: `@project` silently
+ * matches zero rows (the REST `wiql` endpoint doesn't expand it), and
+ * `@CurrentIteration` hard-errors ("not supported without a team context").
+ * `UNDER` (rather than `=`) also correctly includes nested sub-iterations.
  */
-export function listWiql(project?: string, excludeState?: string): string {
+export function listWiql(
+  project?: string,
+  excludeState?: string,
+  iteration?: IterationFilter,
+): string {
   const scope = project ? ` AND [System.TeamProject] = '${wiqlLiteral(project)}'` : '';
   const notDone = excludeState ? ` AND [System.State] <> '${wiqlLiteral(excludeState)}'` : '';
+  const iterationClause = iteration
+    ? (() => {
+        const under = `[System.IterationPath] UNDER '${wiqlLiteral(iteration.path)}'`;
+        if (!iteration.unscheduledName) return ` AND ${under}`;
+        const unscheduled = `[System.IterationPath] = '${wiqlLiteral(iteration.unscheduledName)}'`;
+        return ` AND (${under} OR ${unscheduled})`;
+      })()
+    : '';
   return (
-    'SELECT [System.Id], [System.Title], [System.State], [System.BoardColumn], [System.Description] ' +
-    `FROM WorkItems WHERE [System.WorkItemType] = 'Issue'${scope}${notDone} ORDER BY [System.Id]`
+    'SELECT [System.Id], [System.Title], [System.State], [System.BoardColumn], ' +
+    '[System.Description], [System.IterationPath] ' +
+    `FROM WorkItems WHERE [System.WorkItemType] = 'Issue'${scope}${notDone}${iterationClause} ORDER BY [System.Id]`
   );
 }
 
@@ -139,6 +181,22 @@ export function parseSignedInUser(json: string): string {
   return (d?.mail || d?.userPrincipalName || '').trim();
 }
 
+/** The leaf segment of an Azure iteration path, e.g. `"Proj\Sprint 3"` → `"Sprint 3"`. */
+export function leafIterationName(path: string): string {
+  return path.split('\\').pop() ?? path;
+}
+
+/**
+ * A ticket's displayed iteration name from its raw `System.IterationPath`.
+ * `undefined` for the bare project-root path (no backslash) — what an
+ * unscheduled work item's IterationPath defaults to; showing that as
+ * "iteration: Proj" would be misleading rather than informative.
+ */
+export function scheduledIterationName(path: string | undefined): string | undefined {
+  if (!path || !path.includes('\\')) return undefined;
+  return leafIterationName(path);
+}
+
 /** Inverse mapping: a board column back to a ticket status. */
 export function statusFromColumn(column: string, cols: ColumnMap): TicketStatus | undefined {
   if (column === cols.todo) return 'Pending';
@@ -159,7 +217,7 @@ export function parseWorkItem(
   fields: Record<string, any>,
   id: number,
   cols: ColumnMap = DEFAULT_COLUMNS,
-): StoredTicket | null {
+): (StoredTicket & { iteration?: string }) | null {
   const desc: string = fields['System.Description'] ?? '';
   const m = MARKER_RE.exec(desc);
   if (!m) return null;
@@ -175,11 +233,13 @@ export function parseWorkItem(
   // and fall back to the raw state for items not yet placed on the board.
   const column: string = fields['System.BoardColumn'] ?? fields['System.State'] ?? '';
   const status = statusFromColumn(column, cols) ?? parsed.data.status;
+  const iteration = scheduledIterationName(fields['System.IterationPath']);
   return {
     ...parsed.data,
     key: String(id),
     slug: parsed.data.slug ?? slugify(parsed.data.title),
     status,
+    ...(iteration ? { iteration } : {}),
   };
 }
 
@@ -280,6 +340,9 @@ export class AzureTicketProvider implements TicketProvider {
       columns?: ColumnMap;
       /** Board-column → System.State map (see BoardConfig.columnStates). */
       columnStates?: Record<string, string>;
+      /** Team that owns the board — required for iteration discovery
+       * (`listIterations`/`setIteration`/the default current-iteration filter). */
+      team?: string;
     },
   ) {
     this.columns = opts.columns ?? DEFAULT_COLUMNS;
@@ -327,7 +390,9 @@ export class AzureTicketProvider implements TicketProvider {
    */
   private signedInUser(): string {
     try {
-      return parseSignedInUser(execRead(['az', 'ad', 'signed-in-user', 'show', '--output', 'json']));
+      return parseSignedInUser(
+        execRead(['az', 'ad', 'signed-in-user', 'show', '--output', 'json']),
+      );
     } catch {
       return '';
     }
@@ -386,7 +451,7 @@ export class AzureTicketProvider implements TicketProvider {
     return { id: wi.id, fields: wi.fields ?? {} };
   }
 
-  async get(key: string): Promise<StoredTicket | null> {
+  async get(key: string): Promise<(StoredTicket & { iteration?: string }) | null> {
     const { id, fields } = this.showRaw(key);
     return parseWorkItem(fields, id, this.columns);
   }
@@ -396,13 +461,74 @@ export class AzureTicketProvider implements TicketProvider {
     return stateForColumn(this.columns.done ?? DEFAULT_COLUMNS.done!, this.columnStates);
   }
 
+  /**
+   * Resolve a named iteration (case-insensitive) via `listTeamIterations`.
+   * Throws with the available names listed when there's no match — used both
+   * by an explicit `--iteration <name>` filter and by `setIteration`, where a
+   * silent fallback would be wrong: the user asked for something specific.
+   */
+  private resolveIteration(name: string): AzureIteration {
+    if (!this.opts.team) {
+      throw new Error(
+        'no team configured for iterations — re-run `kodi init` for an azure board (sets `team` in kodi-dev.yaml).',
+      );
+    }
+    const all = listTeamIterations(
+      this.opts.organization ?? '',
+      this.opts.project ?? '',
+      this.opts.team,
+    );
+    const match = all.find((i) => i.name.toLowerCase() === name.toLowerCase());
+    if (!match) {
+      const available = all.map((i) => i.name).join(', ') || '(none configured)';
+      throw new Error(`no iteration named "${name}" (available: ${available})`);
+    }
+    return match;
+  }
+
+  /**
+   * Best-effort resolution of the default listing filter (current iteration +
+   * unscheduled). Returns undefined — degrading the DEFAULT listing to "no
+   * iteration filter" — for anything that stops this from resolving (no team
+   * configured, the team has no current iteration, a transient discovery
+   * failure). Only an EXPLICIT `--iteration <name>` or `listIterations()`
+   * surfaces an error; the implicit default never breaks a project that
+   * hasn't set up sprints.
+   */
+  private defaultIterationFilter(): IterationFilter | undefined {
+    if (!this.opts.team || !this.opts.organization || !this.opts.project) return undefined;
+    try {
+      const current = listTeamIterations(
+        this.opts.organization,
+        this.opts.project,
+        this.opts.team,
+        undefined,
+        'Current',
+      )[0];
+      if (!current) return undefined;
+      const unscheduledName = backlogIterationName(
+        this.opts.organization,
+        this.opts.project,
+        this.opts.team,
+      );
+      return { path: current.path, unscheduledName };
+    } catch {
+      return undefined;
+    }
+  }
+
   async list(opts?: ListOptions): Promise<TicketRef[]> {
+    const iteration = opts?.allIterations
+      ? undefined
+      : opts?.iteration
+        ? { path: this.resolveIteration(opts.iteration).path }
+        : this.defaultIterationFilter();
     const out = execRead([
       'az',
       'boards',
       'query',
       '--wiql',
-      listWiql(this.opts.project, opts?.includeDone ? undefined : this.doneState()),
+      listWiql(this.opts.project, opts?.includeDone ? undefined : this.doneState(), iteration),
       '--output',
       'json',
       ...this.scopeArgs(),
@@ -457,14 +583,59 @@ export class AzureTicketProvider implements TicketProvider {
       this.opts.dryRun,
     );
   }
+
+  async listIterations(): Promise<Iteration[]> {
+    if (!this.opts.team) {
+      throw new Error(
+        'no team configured for iterations — re-run `kodi init` for an azure board (sets `team` in kodi-dev.yaml).',
+      );
+    }
+    const all = listTeamIterations(
+      this.opts.organization ?? '',
+      this.opts.project ?? '',
+      this.opts.team,
+    );
+    return all.map((i) => ({
+      id: i.path,
+      name: i.name,
+      startDate: i.startDate,
+      endDate: i.finishDate,
+      current: i.timeFrame === 'current',
+    }));
+  }
+
+  async setIteration(
+    key: string,
+    iteration: string,
+  ): Promise<StoredTicket & { iteration?: string }> {
+    const resolved = this.resolveIteration(iteration);
+    const current = await this.get(key);
+    if (!current) throw new Error(`work-item ${key} not found`);
+    execMutate(
+      [
+        'az',
+        'boards',
+        'work-item',
+        'update',
+        '--id',
+        key,
+        '--fields',
+        `System.IterationPath=${resolved.path}`,
+        ...this.orgArgs(),
+      ],
+      this.opts.dryRun,
+    );
+    return { ...current, iteration: leafIterationName(resolved.path) };
+  }
 }
 
-function toRef(t: StoredTicket): TicketRef {
+function toRef(t: StoredTicket & { iteration?: string }): TicketRef {
   return {
     key: t.key,
     title: t.title,
     status: t.status,
     slug: t.slug,
     dependencies: t.dependencies,
+    ...(t.iteration ? { iteration: t.iteration } : {}),
   };
 }
