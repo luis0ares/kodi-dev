@@ -73,6 +73,21 @@ export interface BoardConfig {
    * add/remove`, seeded at `kodi init` time.
    */
   docsTypes?: string[];
+  /**
+   * Where `kodi tickets start --worktree` creates worktrees, relative to the
+   * project root (the directory `.claude/kodi-dev.yaml` lives under). Defaults
+   * to {@link DEFAULT_WORKTREES_DIR} when unset.
+   */
+  worktreesDir?: string;
+  /**
+   * The branch `kodi tickets start` bases a NEW `slice/kodi-<id>` branch (or
+   * worktree) on. Unset means "the current active branch" — the default git
+   * behavior of branching from whatever is checked out. Set this to always cut
+   * slices from a fixed integration branch (e.g. `develop`) regardless of what
+   * happens to be checked out at the time. Ignored when the slice branch already
+   * exists (re-running `start` just reuses it).
+   */
+  sourceBranch?: string;
 }
 
 const DEFAULTS: BoardConfig = { provider: 'local', prefix: 'KODI' };
@@ -81,6 +96,11 @@ const DEFAULTS: BoardConfig = { provider: 'local', prefix: 'KODI' };
  * 5 folders the docs scaffold has always created. Editable afterward via
  * `kodi docs types add/remove`; never a fixed enum anywhere else in the code. */
 export const DEFAULT_DOC_TYPES = ['prd', 'adr', 'security', 'plan', 'diagrams'];
+
+/** Default location for `kodi tickets start --worktree`, relative to the project
+ * root — alongside `.claude/kodi-dev.yaml`. Overridable via `worktreesDir` in
+ * `kodi-dev.yaml`. */
+export const DEFAULT_WORKTREES_DIR = '.claude/worktrees';
 
 /** The kodi state file name (per-project, non-secret). */
 export const STATE_FILE = 'kodi-dev.yaml';

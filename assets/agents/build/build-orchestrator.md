@@ -11,7 +11,7 @@ description: >-
   <example>
   Context: A ticket is ready and the user starts the build.
   user: "Start ticket KODI-014 as a slice."
-  assistant: "build-orchestrator will scout the slice, cut the branch, run the security guidance pass, delegate implementation + tests, then gate it."
+  assistant: "build-orchestrator will scout the slice, run the security guidance pass, delegate implementation + tests, then gate it."
   <commentary>Coordinating a full vertical slice is exactly this agent's job.</commentary>
   </example>
   <example>
@@ -72,6 +72,7 @@ Touch points: <exact file paths to create/modify>
 Pattern to follow: <path to the closest existing example>
 Scoped commands: <the narrow test/lint commands for this slice — see Gate economy>
 Out of scope: <what NOT to touch>
+Working directory: <the repo root, or the worktree path if /ticket-start used --worktree>
 ```
 
 **Every spawn prompt = the Slice Brief + that agent's specific task.** Sub-agents
@@ -101,9 +102,14 @@ only. State in your report which you skipped and why.
 
 Record the roster in `TodoWrite` before you spawn anything.
 
-## Step 2 — Branch + start
+## Step 2 — Confirm the branch/worktree
 
-Create the slice branch named for the ticket; run `kodi tickets start <key>`.
+`/ticket-start` already ran `kodi tickets start <key> --yes` before spawning you —
+the ticket is `In progress`, and its `slice/kodi-<key>` branch (or, with
+`--worktree`, an isolated worktree under `.claude/worktrees/`) already exists.
+You do not create it yourself. If it was a worktree, note its path as the
+**Working directory** in the Slice Brief and instruct every sub-agent to work
+there — the main checkout is on a different branch and must not be touched.
 
 ## Step 3 — Implement (parallel where independent)
 

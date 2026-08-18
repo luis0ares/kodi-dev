@@ -42,7 +42,9 @@ make install               # build + install the kodi binary globally from sourc
   (ask-never-assume, ADR-is-law) into every session;
 - installs the **phase skills** (`/discover`, `/oplan`, `/tickets`, `/ticket-start`, …),
   the **sub-agents**, and a `docs/` scaffold;
-- configures your **board provider** and writes `.claude/kodi-dev.yaml`.
+- configures your **board provider** and **docs backend**, and writes
+  `.claude/kodi-dev.yaml` — every field it can write, and every field it can't, is listed in
+  full in [Configuration reference](#configuration-reference-kodi-devyaml) below.
 
 It is **idempotent** — it merges into an existing `.claude/settings.json` without
 clobbering other hooks, so it is safe to re-run.
@@ -52,7 +54,7 @@ clobbering other hooks, so it is safe to re-run.
 kodi tracks work on a board and drives ticket status through it. Pick one at init:
 
 | Provider     | Where tickets live                                   | Status is driven by                                  |
-| ------------ | ---------------------------------------------------- | ---------------------------------------------------- |
+| ------------ | ----------------------------------------------------- | ----------------------------------------------------- |
 | **`local`**  | one file per ticket under **`docs/tickets/`**        | a local status index — no external service           |
 | **`github`** | repo **issues**, added to a **Projects v2** board    | the board's single-select **Status** field           |
 | **`azure`**  | Azure DevOps **work items** on a **basic board**     | the board columns                                     |
@@ -117,6 +119,72 @@ with `kodi docs migrate --to <local|azure-wiki> --yes`.
 
 ---
 
+## Configuration reference (`kodi-dev.yaml`)
+
+Everything kodi knows about a project lives in one file, `.claude/kodi-dev.yaml`. Some of
+it is written for you by the `kodi init` wizard; the rest is intentionally **not**
+prompted for — it exists for cases the common path doesn't need, and you set it by hand
+editing the YAML.
+
+### Set by `kodi init`
+
+| Field | Meaning | Set for |
+| --- | --- | --- |
+| `provider` | Board provider: `local` \| `github` \| `azure` | always |
+| `prefix` | Local ticket key prefix (default `KODI`) | `local` |
+| `organization` | Azure DevOps org URL | `azure` board, or an `azure-wiki` docs backend when the board isn't `azure` |
+| `project` | Azure DevOps project name | `azure` board, or an `azure-wiki` docs backend when the board isn't `azure` |
+| `team` | Azure team that owns the board | `azure` |
+| `board` | Azure board name (e.g. `Issues`) | `azure` |
+| `columnStates` | Chosen column name → work-item state, discovered from the real board | `azure` |
+| `repository` | Repo for PRs/issues (Azure: bare name; GitHub: `owner/repo`) | `azure`, `github` |
+| `projectOwner` | GitHub Projects v2 owner login (org or user) | `github` |
+| `projectNumber` | GitHub Projects v2 board number | `github` |
+| `columns` | Status → column map (`todo`/`inProgress`/`toReview`/`done`) | `github`, `azure` |
+| `prTarget` | Default target branch for `kodi pr create`, chosen from the remote's real branches | `github`, `azure` |
+| `docsProvider` | Docs backend: `local` \| `azure-wiki` | always (a separate prompt from the board provider) |
+| `docsWiki` | Azure wiki name (default `<project>.wiki`) | `azure-wiki` docs |
+| `docsTypes` | The project's registered doc types | always — seeded with `[prd, adr, security, plan, diagrams]`; edit the list afterward with `kodi docs types add/remove` (not re-prompted by `init`) |
+
+### Additional configuration (not set by `kodi init`)
+
+These exist for cases the wizard deliberately doesn't ask about — there's no sensible
+default to prompt for, so they're opt-in, hand-edited fields:
+
+| Field | Meaning | Default when unset |
+| --- | --- | --- |
+| `worktreesDir` | Where `kodi tickets start --worktree` creates worktrees, relative to the project root | `.claude/worktrees` |
+| `sourceBranch` | The branch `kodi tickets start` bases a **new** `slice/kodi-<id>` branch (or worktree) on. Ignored when the slice branch already exists — reusing one keeps its own base. | the current active branch (default git behavior) |
+
+Example — a project on the `azure` board provider, local docs, with both additional fields set:
+
+```yaml
+provider: azure
+prefix: KODI
+organization: https://dev.azure.com/acme
+project: MyProject
+team: MyProject Team
+board: Issues
+columns:
+  todo: To Do
+  inProgress: Doing
+  toReview: To Review
+  done: Done
+columnStates:
+  To Do: To Do
+  Doing: Doing
+  To Review: Doing
+  Done: Done
+repository: MyProject
+prTarget: main
+docsProvider: local
+docsTypes: [prd, adr, security, plan, diagrams]
+worktreesDir: .claude/worktrees   # optional — this is the default anyway
+sourceBranch: develop             # optional — every new slice branches from develop
+```
+
+---
+
 ## How it works
 
 kodi runs three explicit phases — **no auto-advancing pipeline** — each triggered by a
@@ -124,7 +192,7 @@ skill and coordinated by an orchestrator. Every hand-off is a durable artifact, 
 can be re-run or resumed after a `/clear` or `/compact`.
 
 | Phase       | Skill(s)             | Orchestrator                     | Output                             |
-| ----------- | -------------------- | -------------------------------- | ---------------------------------- |
+| ----------- | -------------------- | -------------------------------- | ----------------------------------- |
 | Briefing    | `/discover`          | main-loop                        | `briefing.md` + thin `CLAUDE.md`   |
 | Planning    | `/oplan`, `/oreplan` | main-loop (hub-and-spoke)        | phased plan in `docs/plan`         |
 | Ticketing   | `/tickets`, `/retickets` | main-loop → CLI              | tickets on the board               |
@@ -160,8 +228,20 @@ kodi tickets get KODI-001            # any ticket, Done or not
 kodi tickets deps KODI-001 --add KODI-002   # read or declare dependencies
 kodi tickets set-status KODI-001 Done
 kodi tickets amend KODI-001 --file patch.yaml
-kodi tickets hand-off KODI-001 --pr <url>   # end of slice: → To Review, link the PR
+kodi tickets start KODI-001 --yes             # → In progress, assigns you, cuts slice/kodi-KODI-001
+kodi tickets start KODI-001 --worktree --yes  # …or an isolated worktree instead
+kodi tickets start KODI-002 --no-branch --yes # bundling onto a branch another `start` already cut
+kodi tickets hand-off KODI-001 --pr <url>     # end of slice: → To Review, link the PR
 ```
+
+`start` always cuts (or reuses) a `slice/kodi-<id>` git branch, based on the current
+active branch — or, if `sourceBranch` is set in `kodi-dev.yaml`, on that fixed ref every
+time, regardless of what's currently checked out (see [Configuration
+reference](#configuration-reference-kodi-devyaml)). With `--worktree` it creates that
+branch as a separate worktree instead of switching the current checkout — under
+`.claude/worktrees/` by default, overridable per-project via `worktreesDir`.
+`--no-branch` skips branch/worktree creation entirely, for bundling several tickets onto
+one branch (`--worktree` and `--no-branch` together are rejected).
 
 Every ticket is validated against a strict template before it is written or sent to the
 provider.

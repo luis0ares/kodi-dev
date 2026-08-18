@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
+import { DEFAULT_WORKTREES_DIR, findProjectRoot, loadBoardConfig } from '../config.js';
+import { startSliceGit } from '../git.js';
 import { LegacyDataError, type LegacyDataReport } from '../providers/local.js';
 import { resolveProvider } from '../providers/index.js';
 import type { TicketProvider, TicketRef } from '../providers/types.js';
@@ -198,17 +200,52 @@ export function registerTicketsCommand(program: Command) {
   tickets
     .command('start <key>')
     .description(
-      'Mark a ticket started (In progress), assigned to you (github/azure; local has no assignee)',
+      'Mark a ticket started (In progress, assigned to you on github/azure) and cut its ' +
+        'slice/kodi-<id> branch — or an isolated worktree with --worktree',
     )
-    .option('--branch <name>')
+    .option(
+      '--worktree',
+      'create an isolated git worktree instead of checking out the branch in place',
+      false,
+    )
+    .option(
+      '--no-branch',
+      'skip branch/worktree creation — use when bundling several tickets onto one ' +
+        'already-cut branch (only the first `start` in the batch omits this)',
+    )
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
       key = canonicalizeTicketKey(key);
+      if (o.worktree && o.branch === false) {
+        process.stderr.write('--worktree and --no-branch are mutually exclusive\n');
+        process.exitCode = 1;
+        return;
+      }
+      let git: { branch: string; worktreePath?: string } | undefined;
+      if (o.branch !== false) {
+        const cfg = loadBoardConfig(process.cwd());
+        git = startSliceGit(key, {
+          worktree: o.worktree,
+          worktreesDir: cfg.worktreesDir ?? DEFAULT_WORKTREES_DIR,
+          root: findProjectRoot(process.cwd()),
+          dryRun: !o.yes,
+          sourceBranch: cfg.sourceBranch,
+        });
+      }
       const t = await resolveProvider(process.cwd(), { yes: o.yes }).start(key, {
-        branch: o.branch,
+        branch: git?.branch,
       });
-      out(t, o.json, () => `${t.key} → ${t.status}`);
+      out({ ...t, branch: git?.branch, worktreePath: git?.worktreePath }, o.json, () =>
+        [
+          `${t.key} → ${t.status}`,
+          git
+            ? git.worktreePath
+              ? `worktree: ${git.worktreePath}`
+              : `branch: ${git.branch}`
+            : 'branch: skipped (--no-branch)',
+        ].join('\n'),
+      );
     });
 
   tickets

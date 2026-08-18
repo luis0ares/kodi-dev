@@ -84,12 +84,26 @@ kodi tickets deps KODI-003 --add KODI-001 --add KODI-002 --yes   # declare deps
 
 ```bash
 kodi tickets set-status KODI-003 "In progress" --yes
-kodi tickets start KODI-003 --branch feat/csv-import --yes   # → In progress (+ branch, assigns you)
+kodi tickets start KODI-003 --yes             # → In progress, assigns you, cuts slice/kodi-KODI-003
+kodi tickets start KODI-003 --worktree --yes  # …or an isolated worktree instead
+kodi tickets start KODI-004 --no-branch --yes # bundling onto a branch another `start` already cut
 kodi tickets amend KODI-003 -s "New summary" --ac "New AC" --notes "…" --yes
 kodi tickets link-pr KODI-003 <pr-url-or-id> --yes
 kodi tickets hand-off KODI-003 --pr <pr-url-or-id> --yes     # → To review, links the PR
 kodi tickets delete KODI-003 --yes
 ```
+
+- `start` always cuts (or reuses) a `slice/kodi-<id>` branch — pass that name to
+  `kodi pr create --source`. New branches base off the current active branch,
+  unless `sourceBranch` is set in `kodi-dev.yaml`, in which case they always
+  base off that ref instead. With `--worktree` it creates the branch as an
+  isolated worktree instead, at `.claude/worktrees/slice-kodi-<id>` (the `/` is
+  flattened to `-` in the directory name only, so worktrees don't all nest under
+  one shared `slice/` folder; override the directory with `worktreesDir` in
+  `kodi-dev.yaml`), leaving the current checkout untouched. `--no-branch` skips
+  branch/worktree creation entirely — use it when
+  bundling several tickets onto one branch: only the first `start` in the batch
+  omits it. `--worktree` and `--no-branch` are mutually exclusive (rejected).
 
 > Never move a ticket to `Done` yourself — that is the human's call on merge.
 
@@ -246,9 +260,9 @@ Only needed when a doc doesn't fit any of the project's existing types — check
 ## Typical slice flow
 
 ```bash
-kodi tickets start KODI-003 --branch feat/csv-import --yes
-# … implement on the branch …
-kodi pr create --source feat/csv-import --target main \
+kodi tickets start KODI-003 --yes   # → In progress, cuts slice/kodi-KODI-003 (assigns you)
+# … implement on the branch (or inside the worktree, with --worktree) …
+kodi pr create --source slice/kodi-KODI-003 --target main \
   -t "feat: CSV import" -s "…" --type feature --feature "…" \
   --issue "Closes #1196" --testing unit --yes
 kodi tickets hand-off KODI-003 --pr <pr-url> --yes   # → To review
