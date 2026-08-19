@@ -23,6 +23,7 @@ import {
   scheduledIterationName,
   stateForColumn,
   updateArgs,
+  updateFieldsArgs,
 } from '../src/providers/azure.js';
 import { TicketSchema, type StoredTicket } from '../src/templates/ticket.js';
 import { azFileArg } from '../src/tmpfile.js';
@@ -97,9 +98,10 @@ describe('azure provider — command construction', () => {
     for (const a of args) expect(a).not.toContain('\n');
   });
 
-  it('keeps the historical --fields update form off Windows, byte for byte', () => {
+  it('sends description + title under ONE --fields off Windows (a repeat drops one)', () => {
     const html = descriptionHtml(stored());
-    // This is the shape kodi has always sent, and the Windows fix must not touch it.
+    // az registers --fields as a single nargs='*' argument: repeating the flag makes
+    // argparse keep only the LAST pair, so a titled patch used to lose its description.
     expect(updateArgs('7', html, 'New title', 'linux')).toEqual([
       'az',
       'boards',
@@ -109,11 +111,29 @@ describe('azure provider — command construction', () => {
       '7',
       '--fields',
       `System.Description=${html}`,
-      '--fields',
       'System.Title=New title',
     ]);
+    expect(
+      updateArgs('7', html, 'New title', 'linux').filter((a) => a === '--fields'),
+    ).toHaveLength(1);
     // …and an untitled patch still sends description only.
     expect(updateArgs('7', html, undefined, 'linux')).not.toContain('--title');
+  });
+
+  it('puts every field pair on a single --fields flag', () => {
+    expect(updateFieldsArgs('7', ['System.State=Doing', 'WEF_x_Kanban.Column=Doing'])).toEqual([
+      'az',
+      'boards',
+      'work-item',
+      'update',
+      '--id',
+      '7',
+      '--fields',
+      'System.State=Doing',
+      'WEF_x_Kanban.Column=Doing',
+    ]);
+    // no pairs → no dangling flag for az to choke on
+    expect(updateFieldsArgs('7', [])).not.toContain('--fields');
   });
 
   it('switches the update to --description @file / --title on Windows', () => {

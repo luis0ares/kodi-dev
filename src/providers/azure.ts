@@ -316,14 +316,28 @@ export function updateArgs(
   title?: string,
   platform: NodeJS.Platform = process.platform,
 ): string[] {
-  const args = ['az', 'boards', 'work-item', 'update', '--id', key];
   if (platform === 'win32') {
+    const args = ['az', 'boards', 'work-item', 'update', '--id', key];
     args.push('--description', azFileArg(html, 'kodi-wi-', platform));
     if (title) args.push('--title', title);
     return args;
   }
-  args.push('--fields', `System.Description=${html}`);
-  if (title) args.push('--fields', `System.Title=${title}`);
+  const fields = [`System.Description=${html}`];
+  if (title) fields.push(`System.Title=${title}`);
+  return updateFieldsArgs(key, fields);
+}
+
+/**
+ * `az boards work-item update --id <id> --fields <pair> <pair> …` — EVERY pair must
+ * ride ONE `--fields` flag. az registers `--fields` as a single `nargs='*'` argument,
+ * so a REPEATED flag does not accumulate: argparse's default `store` action keeps only
+ * the LAST occurrence and every earlier pair is dropped without a warning. Emitting one
+ * flag per pair is what made `kodi tickets start` assign the work item (the last pair)
+ * while silently discarding the state + Kanban column writes that move its card.
+ */
+export function updateFieldsArgs(id: string, fields: string[]): string[] {
+  const args = ['az', 'boards', 'work-item', 'update', '--id', id];
+  if (fields.length) args.push('--fields', ...fields);
   return args;
 }
 
@@ -376,11 +390,10 @@ export class AzureTicketProvider implements TicketProvider {
     kanbanField?: string,
     assignedTo?: string,
   ): string[] {
-    const args = ['az', 'boards', 'work-item', 'update', '--id', id];
-    for (const f of moveFields(status, this.columns, this.columnStates, kanbanField, assignedTo)) {
-      args.push('--fields', f);
-    }
-    return [...args, ...this.orgArgs()];
+    const fields = moveFields(status, this.columns, this.columnStates, kanbanField, assignedTo);
+    // All pairs go on ONE `--fields` flag — see {@link updateFieldsArgs} for why
+    // repeating the flag drops every pair but the last.
+    return [...updateFieldsArgs(id, fields), ...this.orgArgs()];
   }
 
   /**
@@ -612,17 +625,7 @@ export class AzureTicketProvider implements TicketProvider {
     const current = await this.get(key);
     if (!current) throw new Error(`work-item ${key} not found`);
     execMutate(
-      [
-        'az',
-        'boards',
-        'work-item',
-        'update',
-        '--id',
-        key,
-        '--fields',
-        `System.IterationPath=${resolved.path}`,
-        ...this.orgArgs(),
-      ],
+      [...updateFieldsArgs(key, [`System.IterationPath=${resolved.path}`]), ...this.orgArgs()],
       this.opts.dryRun,
     );
     return { ...current, iteration: leafIterationName(resolved.path) };
