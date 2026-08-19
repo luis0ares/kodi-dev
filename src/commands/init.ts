@@ -45,28 +45,36 @@ interface HookEntry {
 }
 
 /**
- * Idempotently add one command hook under `event`, with an optional tool `matcher`.
- * Returns false when that command is already wired (so a re-run never duplicates it).
- * Shared by the per-event merge functions below.
+ * Re-assert ONE command hook under `event`, with an optional tool `matcher`. Every
+ * existing wiring of that command is stripped first and a fresh entry appended, so a
+ * re-run leaves exactly one — carrying the CURRENT matcher — no matter how the old
+ * one was written or hand-edited. Hooks for other commands are preserved (including
+ * siblings sharing an entry). Returns whether anything changed.
  */
-function addHookOnce(
+function applyHook(
   settings: { hooks?: Record<string, HookEntry[]> },
   event: string,
   command: string,
   matcher?: string,
 ): boolean {
   const hooks = (settings.hooks ??= {});
-  const arr = (hooks[event] ??= []);
-  if (arr.some((e) => e.hooks?.some((h) => h.command === command))) return false;
+  const before = JSON.stringify(hooks[event] ?? []);
   const entry: HookEntry = { hooks: [{ type: 'command', command }] };
   if (matcher) entry.matcher = matcher;
-  arr.push(entry);
-  return true;
+  const others = (hooks[event] ?? [])
+    .map((e) => ({ ...e, hooks: (e.hooks ?? []).filter((h) => h.command !== command) }))
+    .filter((e) => e.hooks.length > 0);
+  hooks[event] = [...others, entry];
+  return JSON.stringify(hooks[event]) !== before;
 }
 
-/** Idempotently merge the kodi SessionStart hook into a settings.json object. */
+/**
+ * Re-assert the kodi SessionStart hook on a settings.json object. init is the
+ * "restore the kodi baseline" command, so the hook is rewritten from the current
+ * command + matcher on every run rather than skipped when already present.
+ */
 export function mergeSessionStartHook(settings: Record<string, any>): boolean {
-  return addHookOnce(settings, 'SessionStart', HOOK_COMMAND, SESSION_MATCHER);
+  return applyHook(settings, 'SessionStart', HOOK_COMMAND, SESSION_MATCHER);
 }
 
 /**
@@ -112,25 +120,29 @@ export const PERMISSION_ALLOW = [
 ];
 
 /**
- * Idempotently merge the default permission rules into a settings object. Existing
- * user rules are preserved; only missing rules are appended, so re-running init
- * never duplicates or clobbers a hand-edited allow/deny list.
+ * Rebuild one rule list: kodi's defaults first, in their canonical order, then every
+ * rule kodi does not ship, deduped and in the order the user had them.
+ */
+function applyRules(existing: unknown, defaults: string[]): string[] {
+  const extras = Array.isArray(existing) ? (existing as string[]) : [];
+  return [...defaults, ...new Set(extras.filter((r) => !defaults.includes(r)))];
+}
+
+/**
+ * Re-assert the default permission rules on a settings object. Every init rewrites
+ * kodi's own rules from the CURRENT defaults, so a re-run repairs a list that drifted
+ * — a rule deleted, duplicated, or reordered by hand comes back exactly once. Rules
+ * kodi does not ship are preserved. Returns whether anything changed.
  */
 export function mergePermissions(settings: Record<string, any>): boolean {
   const perms = (settings.permissions ??= {});
-  const deny: string[] = (perms.deny ??= []);
-  const allow: string[] = (perms.allow ??= []);
-  let changed = false;
-  for (const rule of PERMISSION_DENY)
-    if (!deny.includes(rule)) {
-      deny.push(rule);
-      changed = true;
-    }
-  for (const rule of PERMISSION_ALLOW)
-    if (!allow.includes(rule)) {
-      allow.push(rule);
-      changed = true;
-    }
+  const deny = applyRules(perms.deny, PERMISSION_DENY);
+  const allow = applyRules(perms.allow, PERMISSION_ALLOW);
+  const changed =
+    JSON.stringify(perms.deny ?? []) !== JSON.stringify(deny) ||
+    JSON.stringify(perms.allow ?? []) !== JSON.stringify(allow);
+  perms.deny = deny;
+  perms.allow = allow;
   return changed;
 }
 
@@ -145,16 +157,16 @@ export const DEFAULT_ENV: Record<string, string> = {
 };
 
 /**
- * Idempotently merge the default env vars into a settings object. Only keys that
- * are ABSENT are added; a value the user has already set is preserved (never
- * clobbered), so re-running init neither duplicates nor overrides a hand-edited
- * `env`. Returns whether anything changed.
+ * Re-assert the default env vars on a settings object. Every key kodi owns is written
+ * with the CURRENT default on each init — a hand-edited value IS replaced, since init
+ * restores the kodi baseline. Keys kodi does not ship are left untouched. Returns
+ * whether anything changed.
  */
 export function mergeEnv(settings: { env?: Record<string, string> }): boolean {
   const env = (settings.env ??= {});
   let changed = false;
   for (const [key, value] of Object.entries(DEFAULT_ENV))
-    if (!(key in env)) {
+    if (env[key] !== value) {
       env[key] = value;
       changed = true;
     }
@@ -166,7 +178,27 @@ export function defaultAssetsDir(): string {
   return fileURLToPath(new URL('../assets/', import.meta.url));
 }
 
-function copyTree(srcRoot: string, destRoot: string, force: boolean, reportBase: string): string[] {
+/**
+ * Install one packaged asset at `dest`, replacing whatever is there. EVERY init
+ * reinstalls the shipped file — that is how a project picks up the agents, skills and
+ * rules of the kodi version it is being re-inited with (and how a locally edited copy
+ * is restored). A byte-identical destination is left alone so its mtime is stable and
+ * the report stays limited to what actually moved; the returned label says which.
+ */
+function installFile(src: string, dest: string): 'new' | 'updated' | null {
+  const existed = existsSync(dest);
+  if (existed && readFileSync(src).equals(readFileSync(dest))) return null;
+  mkdirSync(dirname(dest), { recursive: true });
+  copyFileSync(src, dest);
+  return existed ? 'updated' : 'new';
+}
+
+/** Report line for an installed file — an overwrite is flagged, a fresh copy is not. */
+function reportLine(path: string, state: 'new' | 'updated'): string {
+  return state === 'updated' ? `${path} (updated)` : path;
+}
+
+function copyTree(srcRoot: string, destRoot: string, reportBase: string): string[] {
   const written: string[] = [];
   if (!existsSync(srcRoot)) return written;
   const walk = (src: string, dest: string) => {
@@ -175,10 +207,8 @@ function copyTree(srcRoot: string, destRoot: string, force: boolean, reportBase:
       const d = join(dest, entry);
       if (statSync(s).isDirectory()) walk(s, d);
       else {
-        if (existsSync(d) && !force) continue;
-        mkdirSync(dirname(d), { recursive: true });
-        copyFileSync(s, d);
-        written.push(join(reportBase, relative(destRoot, d)));
+        const state = installFile(s, d);
+        if (state) written.push(reportLine(join(reportBase, relative(destRoot, d)), state));
       }
     }
   };
@@ -191,12 +221,7 @@ function copyTree(srcRoot: string, destRoot: string, force: boolean, reportBase:
  * Agents are organized by phase in the source but installed flat so discovery is
  * independent of project-agent subdirectory scanning. `README.md` files are skipped.
  */
-function copyMarkdownFlat(
-  srcRoot: string,
-  destDir: string,
-  force: boolean,
-  reportBase: string,
-): string[] {
+function copyMarkdownFlat(srcRoot: string, destDir: string, reportBase: string): string[] {
   const written: string[] = [];
   if (!existsSync(srcRoot)) return written;
   const walk = (dir: string) => {
@@ -204,11 +229,8 @@ function copyMarkdownFlat(
       const s = join(dir, entry);
       if (statSync(s).isDirectory()) walk(s);
       else if (entry.endsWith('.md') && entry !== 'README.md') {
-        const d = join(destDir, entry);
-        if (existsSync(d) && !force) continue;
-        mkdirSync(destDir, { recursive: true });
-        copyFileSync(s, d);
-        written.push(join(reportBase, entry));
+        const state = installFile(s, join(destDir, entry));
+        if (state) written.push(reportLine(join(reportBase, entry), state));
       }
     }
   };
@@ -217,7 +239,6 @@ function copyMarkdownFlat(
 }
 
 export interface InstallOptions {
-  force?: boolean;
   assetsDir?: string;
   /**
    * The configured board provider. `docs/tickets/` is the LOCAL provider's ticket
@@ -227,9 +248,15 @@ export interface InstallOptions {
   provider?: 'local' | 'github' | 'azure';
 }
 
-/** Install the kodi harness FILES (hook, agents, skills, docs scaffold). */
+/**
+ * Install the kodi harness FILES (hook, agents, skills, rules, docs scaffold).
+ * Re-runnable by design: every packaged agent/skill/rule is reinstalled and kodi's
+ * settings.json block (hook, permissions, env) re-asserted, so re-running init after
+ * a kodi upgrade — or to switch provider — brings the project back to the current
+ * baseline instead of keeping whatever was installed the first time. Files kodi does
+ * not ship, and settings kodi does not own, are never touched.
+ */
 export function installHarness(root: string, opts: InstallOptions = {}): string[] {
-  const force = opts.force ?? false;
   const assetsDir = opts.assetsDir ?? defaultAssetsDir();
   const claude = join(root, '.claude');
   const changed: string[] = [];
@@ -255,9 +282,9 @@ export function installHarness(root: string, opts: InstallOptions = {}): string[
   }
 
   changed.push(
-    ...copyTree(join(assetsDir, 'skills'), join(claude, 'skills'), force, '.claude/skills'),
-    ...copyMarkdownFlat(join(assetsDir, 'agents'), join(claude, 'agents'), force, '.claude/agents'),
-    ...copyTree(join(assetsDir, 'rules'), join(claude, 'rules'), force, '.claude/rules'),
+    ...copyTree(join(assetsDir, 'skills'), join(claude, 'skills'), '.claude/skills'),
+    ...copyMarkdownFlat(join(assetsDir, 'agents'), join(claude, 'agents'), '.claude/agents'),
+    ...copyTree(join(assetsDir, 'rules'), join(claude, 'rules'), '.claude/rules'),
   );
 
   // `tickets` is the LOCAL provider's on-disk ticket store — remote boards
@@ -651,7 +678,6 @@ export function registerInitCommand(program: Command) {
     .command('init')
     .description('Install the kodi harness and configure the board (interactive)')
     .option('-d, --dir <path>', 'target project directory', process.cwd())
-    .option('--force', 'overwrite existing agents/skills', false)
     .option('--provider <local|github|azure>', 'skip the provider prompt')
     .option('--prefix <prefix>', 'local ticket key prefix (default KODI)')
     .option('--org <url>', 'azure org URL (non-interactive)')
@@ -706,12 +732,17 @@ export function registerInitCommand(program: Command) {
         prompter.close();
       }
 
-      const changed = installHarness(root, { force: o.force, provider: config.provider });
+      const changed = installHarness(root, { provider: config.provider });
 
       const statePath = writeState(root, config);
+      const lines = [
+        ...changed.map((c) => `  + ${c}`),
+        `  + ${relative(root, statePath)} (provider: ${config.provider})`,
+      ];
       process.stdout.write(
-        `\nkodi init: installed\n${changed.map((c) => `  + ${c}`).join('\n')}\n` +
-          `  + ${relative(root, statePath)} (provider: ${config.provider})\n\n` +
+        `\nkodi init: installed\n${lines.join('\n')}\n\n` +
+          `Agents, skills and rules are reinstalled from the packaged assets on every ` +
+          `run; files already identical are left as they are.\n` +
           `SessionStart wired to \`${HOOK_COMMAND}\` (matchers: ${SESSION_MATCHER}).\n`,
       );
     });

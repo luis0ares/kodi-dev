@@ -46,8 +46,17 @@ make install               # build + install the kodi binary globally from sourc
   it can write, and every field it can't, is listed in full in [Configuration
   reference](#configuration-reference-kodi-devyaml) below.
 
-It is **idempotent** — it merges into an existing `.claude/settings.json` without
-clobbering other hooks, so it is safe to re-run.
+It is **safe to re-run** — and re-running is how you upgrade a project or change its
+board provider. Every run **reinstalls the kodi baseline**: the packaged agents, skills
+and rules are copied over the installed ones (so a project picks up the agents and
+skills of your current kodi version, and local edits to them are replaced), and kodi's
+`.claude/settings.json` block — the `SessionStart` hook, the permission rules, and the
+`env` defaults — is re-asserted, restoring anything that was deleted or edited away.
+
+Everything kodi does **not** ship is left alone: your own agents and skills, your own
+hooks, permission rules and env vars all survive a re-run untouched. Files from a
+previous kodi version that the current one no longer ships are not deleted either —
+remove those by hand if you want a clean `.claude/agents` / `.claude/skills`.
 
 ### Choose a board provider
 

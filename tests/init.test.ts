@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
@@ -137,6 +137,42 @@ describe('SessionStart hook merge', () => {
     expect(settings.hooks.PreToolUse).toHaveLength(1);
     expect(settings.hooks.SessionStart[0].matcher).toBe('startup|resume|clear|compact');
   });
+
+  it('re-asserts a drifted matcher and never leaves the hook wired twice', () => {
+    const settings: Record<string, any> = {
+      hooks: {
+        SessionStart: [
+          { matcher: 'startup', hooks: [{ type: 'command', command: 'kodi hook session-start' }] },
+          { hooks: [{ type: 'command', command: 'kodi hook session-start' }] },
+        ],
+      },
+    };
+    expect(mergeSessionStartHook(settings)).toBe(true);
+    expect(settings.hooks.SessionStart).toHaveLength(1);
+    expect(settings.hooks.SessionStart[0].matcher).toBe('startup|resume|clear|compact');
+  });
+
+  it('restores the hook the user deleted and keeps a sibling hook in the same entry', () => {
+    const settings: Record<string, any> = {
+      hooks: {
+        SessionStart: [
+          {
+            matcher: 'startup',
+            hooks: [
+              { type: 'command', command: 'my-own-hook' },
+              { type: 'command', command: 'kodi hook session-start' },
+            ],
+          },
+        ],
+      },
+    };
+    expect(mergeSessionStartHook(settings)).toBe(true);
+    expect(settings.hooks.SessionStart).toHaveLength(2);
+    expect(settings.hooks.SessionStart[0].hooks).toEqual([
+      { type: 'command', command: 'my-own-hook' },
+    ]);
+    expect(settings.hooks.SessionStart[1].hooks[0].command).toBe('kodi hook session-start');
+  });
 });
 
 describe('permissions merge', () => {
@@ -197,6 +233,20 @@ describe('permissions merge', () => {
     );
   });
 
+  it('restores rules the user deleted and de-duplicates kodi rules on re-init', () => {
+    const settings: Record<string, any> = {
+      permissions: {
+        // kodi's own list drifted: one rule dropped, another duplicated
+        deny: [PERMISSION_DENY[1], PERMISSION_DENY[1], 'Bash(rm:*)'],
+        allow: ['Bash(pnpm test:*)'],
+      },
+    };
+    expect(mergePermissions(settings)).toBe(true);
+    expect(settings.permissions.deny).toEqual([...PERMISSION_DENY, 'Bash(rm:*)']);
+    expect(settings.permissions.allow).toEqual([...PERMISSION_ALLOW, 'Bash(pnpm test:*)']);
+    expect(mergePermissions(settings)).toBe(false); // stable once re-asserted
+  });
+
   it('seeds permissions from an empty settings object', () => {
     const settings: Record<string, any> = {};
     expect(mergePermissions(settings)).toBe(true);
@@ -214,13 +264,14 @@ describe('env merge', () => {
     expect(DEFAULT_ENV.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH).toBe('5');
   });
 
-  it('preserves an env var the user already set (never clobbers) and adds missing defaults', () => {
+  it('resets a hand-edited kodi env var to the default and leaves other keys alone', () => {
     const settings: Record<string, any> = {
       env: { CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '9', FOO: 'bar' },
     };
-    // the only default key is already present with a custom value → no change
-    expect(mergeEnv(settings)).toBe(false);
-    expect(settings.env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH).toBe('9');
+    // init restores the kodi baseline — the drifted value IS rewritten…
+    expect(mergeEnv(settings)).toBe(true);
+    expect(settings.env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH).toBe('5');
+    // …while a var kodi does not ship stays untouched
     expect(settings.env.FOO).toBe('bar');
   });
 });
@@ -255,6 +306,55 @@ describe('installHarness (files only)', () => {
     expect(existsSync(join(dir, 'docs/tickets'))).toBe(true);
     // the board state file is NOT written by installHarness (the wizard writes it)
     expect(existsSync(join(dir, '.claude/kodi-dev.yaml'))).toBe(false);
+  });
+
+  it('reinstalls edited agents, skills and rules on a re-run, reporting them as updated', () => {
+    installHarness(dir, { assetsDir: REPO_ASSETS });
+    const agent = join(dir, '.claude/agents/architect.md');
+    const skill = join(dir, '.claude/skills/tickets/SKILL.md');
+    const rule = join(dir, '.claude/rules/ticket-completion.md');
+    const pristine = [agent, skill, rule].map((f) => readFileSync(f, 'utf-8'));
+    for (const f of [agent, skill, rule]) writeFileSync(f, 'stale local edit\n', 'utf-8');
+
+    const changed = installHarness(dir, { assetsDir: REPO_ASSETS });
+
+    // every packaged asset is copied again, whatever was in its place
+    expect([agent, skill, rule].map((f) => readFileSync(f, 'utf-8'))).toEqual(pristine);
+    expect(changed).toEqual(
+      expect.arrayContaining([
+        '.claude/agents/architect.md (updated)',
+        join('.claude/skills/tickets', 'SKILL.md') + ' (updated)',
+        join('.claude/rules', 'ticket-completion.md') + ' (updated)',
+      ]),
+    );
+    // …and only those three moved — untouched files are not re-reported
+    expect(changed).toHaveLength(3);
+  });
+
+  it('reports nothing when a re-run finds every asset already current', () => {
+    installHarness(dir, { assetsDir: REPO_ASSETS });
+    expect(installHarness(dir, { assetsDir: REPO_ASSETS })).toEqual([]);
+  });
+
+  it('restores kodi settings.json defaults that were edited away', () => {
+    installHarness(dir, { assetsDir: REPO_ASSETS });
+    const settingsPath = join(dir, '.claude/settings.json');
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({ permissions: { deny: [], allow: ['Bash(pnpm test:*)'] }, env: {} }),
+      'utf-8',
+    );
+
+    const changed = installHarness(dir, { assetsDir: REPO_ASSETS });
+
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    expect(settings.permissions.deny).toEqual(PERMISSION_DENY);
+    expect(settings.permissions.allow).toEqual([...PERMISSION_ALLOW, 'Bash(pnpm test:*)']);
+    expect(settings.env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH).toBe('5');
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toBe('kodi hook session-start');
+    expect(changed).toEqual(
+      expect.arrayContaining(['.claude/settings.json (SessionStart hook + permissions + env)']),
+    );
   });
 
   it.each(['github', 'azure'] as const)(
