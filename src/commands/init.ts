@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -148,8 +149,9 @@ export function mergePermissions(settings: Record<string, any>): boolean {
 
 /**
  * Environment variables written into a new project's `settings.json`. kodi drives
- * work through nested sub-agents (phase → manager → worker), so the default
- * sub-agent spawn-depth ceiling is lifted to keep that delegation chain from being
+ * work through nested sub-agents — planning goes phase → manager → worker, and a
+ * build slice goes build-orchestrator → engineer → its own qa — so the default
+ * sub-agent spawn-depth ceiling is lifted to keep those delegation chains from being
  * cut short. Values are strings — Claude Code reads `env` entries as strings.
  */
 export const DEFAULT_ENV: Record<string, string> = {
@@ -238,6 +240,34 @@ function copyMarkdownFlat(srcRoot: string, destDir: string, reportBase: string):
   return written;
 }
 
+/**
+ * Assets an older kodi shipped that the current version no longer does. Every init
+ * DELETES them, because reinstalling the baseline is only half the job: a project
+ * upgraded from an older kodi would otherwise keep a retired agent alongside the new
+ * roster and the orchestrator could still spawn it. Only paths kodi itself installed
+ * are listed here — nothing the user wrote is ever removed.
+ */
+export const RETIRED_ASSETS = [
+  '.claude/agents/backend-tester.md', // merged into backend-engineer
+  '.claude/agents/frontend-tester.md', // merged into frontend-engineer
+  '.claude/agents/refactor-engineer.md', // became the /refactor skill
+  '.claude/agents/security.md', // became the /security skill
+  '.claude/agents/qa-implementation.md', // renamed to backend-qa, now owned by backend-engineer
+  '.claude/agents/qa-visual.md', // renamed to frontend-qa, now owned by frontend-engineer
+];
+
+/** Delete every retired asset still installed under `root`; returns the report lines. */
+function pruneRetiredAssets(root: string): string[] {
+  const removed: string[] = [];
+  for (const rel of RETIRED_ASSETS) {
+    const path = join(root, rel);
+    if (!existsSync(path)) continue;
+    rmSync(path, { force: true });
+    removed.push(`${rel} (removed)`);
+  }
+  return removed;
+}
+
 export interface InstallOptions {
   assetsDir?: string;
   /**
@@ -250,11 +280,12 @@ export interface InstallOptions {
 
 /**
  * Install the kodi harness FILES (hook, agents, skills, rules, docs scaffold).
- * Re-runnable by design: every packaged agent/skill/rule is reinstalled and kodi's
- * settings.json block (hook, permissions, env) re-asserted, so re-running init after
- * a kodi upgrade — or to switch provider — brings the project back to the current
- * baseline instead of keeping whatever was installed the first time. Files kodi does
- * not ship, and settings kodi does not own, are never touched.
+ * Re-runnable by design: every packaged agent/skill/rule is reinstalled, every
+ * `RETIRED_ASSETS` entry is deleted, and kodi's settings.json block (hook,
+ * permissions, env) is re-asserted — so re-running init after a kodi upgrade, or to
+ * switch provider, brings the project back to the current baseline instead of keeping
+ * whatever was installed the first time. Files kodi does not ship, and settings kodi
+ * does not own, are never touched.
  */
 export function installHarness(root: string, opts: InstallOptions = {}): string[] {
   const assetsDir = opts.assetsDir ?? defaultAssetsDir();
@@ -285,6 +316,7 @@ export function installHarness(root: string, opts: InstallOptions = {}): string[
     ...copyTree(join(assetsDir, 'skills'), join(claude, 'skills'), '.claude/skills'),
     ...copyMarkdownFlat(join(assetsDir, 'agents'), join(claude, 'agents'), '.claude/agents'),
     ...copyTree(join(assetsDir, 'rules'), join(claude, 'rules'), '.claude/rules'),
+    ...pruneRetiredAssets(root),
   );
 
   // `tickets` is the LOCAL provider's on-disk ticket store — remote boards

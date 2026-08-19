@@ -12,6 +12,7 @@ import {
   mergeSessionStartHook,
   PERMISSION_ALLOW,
   PERMISSION_DENY,
+  RETIRED_ASSETS,
   writeState,
 } from '../src/commands/init.js';
 import type { Prompter } from '../src/prompt.js';
@@ -329,6 +330,19 @@ describe('installHarness (files only)', () => {
     );
     // …and only those three moved — untouched files are not re-reported
     expect(changed).toHaveLength(3);
+  });
+
+  it('deletes agents a previous kodi version shipped and this one retired', () => {
+    installHarness(dir, { assetsDir: REPO_ASSETS });
+    // an older kodi left these behind; the current roster no longer references them
+    for (const rel of RETIRED_ASSETS) writeFileSync(join(dir, rel), 'old kodi agent\n', 'utf-8');
+
+    const changed = installHarness(dir, { assetsDir: REPO_ASSETS });
+
+    for (const rel of RETIRED_ASSETS) expect(existsSync(join(dir, rel))).toBe(false);
+    expect(changed).toEqual(RETIRED_ASSETS.map((rel) => `${rel} (removed)`));
+    // …and a project that never had them is not reported on
+    expect(installHarness(dir, { assetsDir: REPO_ASSETS })).toEqual([]);
   });
 
   it('reports nothing when a re-run finds every asset already current', () => {
