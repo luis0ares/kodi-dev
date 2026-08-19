@@ -60,26 +60,40 @@ kodi tickets start 789 --no-branch --yes     # → In progress only, same branch
 `--worktree` and `--no-branch` are mutually exclusive on a single call (a
 worktree IS a branch) — `kodi` rejects the combination.
 
-The build-orchestrator is the hub: engineers (`backend-engineer`,
-`frontend-engineer`) write feature code; testers (`backend-tester`,
-`frontend-tester`) write tests; `refactor-engineer` tidies the code behavior-
-preservingly as the last implementation step (once tests are green); gates
-(`qa-implementation`, `qa-visual`) plus a `security` bracket. The slice closes ONLY when every gate is green, there is no
-Critical/High security finding, and qa-implementation AND qa-visual are positive.
+The roster is deliberately small: one engineer per side (`backend-engineer`,
+`frontend-engineer`) owns its code, its tests AND its QA in a single context — there are
+no tester agents. Each engineer invokes **its own QA** (`backend-qa`, `frontend-qa`),
+which answers to that engineer and verifies, criterion by criterion, that the work
+actually meets the ticket's acceptance criteria: **MET**, **MET DIFFERENTLY** (allowed
+only with a convincing, evidenced justification — what was asked, what was built, the
+proof it reaches the same goal, why the wording was impossible), or **NOT MET**
+(blocking). The QA agents also run their side's gate, once.
 
-**Regression first, full gate last.** Throughout implementation the feedback signal is
-a scoped regression over the areas the slice touched — never the full suite. The full
-gate runs once, at the end, purely to confirm nothing else broke. **A red regression
-stops the slice**: it routes straight back to the owning engineer, and no
-`refactor-engineer`, `qa-implementation`, `qa-visual` or `security` verify is spawned
-over known-broken code.
+**The build-orchestrator owns the whole, and only it declares the ticket green.** It
+scouts once, delegates, then does what no single engineer can: check that the two sides
+fit the same contract, that every acceptance criterion is claimed by somebody, and that
+the cross-side check is clean. It accepts or rejects each MET DIFFERENTLY. Only after
+that does it open the PR and hand off — the ticket is finished when the orchestrator
+says so, not when a QA passes.
 
-**The roster is triaged, not fixed.** The orchestrator scouts the slice once, writes
-a Slice Brief that every sub-agent works from, and spawns only the specialists the
-slice's surface actually needs — a backend-only slice runs no frontend agents and no
-`qa-visual`; a slice with no security surface skips the guidance pass; the refactor
-pass is conditional on the diff warranting it. This is deliberate: re-derived context
-and unnecessary full-gate runs are what make a slice expensive.
+**Security and refactor are NOT slice steps.** They are human-invoked skills —
+`/security` audits a scope you name, `/refactor` cleans up a target you name — and the
+orchestrator never spawns them. If a slice surfaces something worth either, it says so
+in its report and you decide.
+
+**Regression first, side gates inside QA, cross-side check last.** While implementing,
+the feedback signal is a scoped regression over what the slice touched — never the full
+suite. Each side's full gate runs once inside its QA; the orchestrator runs only the
+cross-side integration/E2E check, and never re-runs a side gate. **A red report stops
+the slice**: it routes straight back to the owning engineer. Remediation is capped at 2
+rounds; a slice that will not converge is surfaced to the human instead of looped on.
+
+**The roster is triaged, not fixed.** The orchestrator writes a Slice Brief that every
+sub-agent works from and spawns only the side(s) the slice's surface actually needs — a
+backend-only slice runs no frontend agent and no `frontend-qa`. This is deliberate:
+re-derived context, split code/test hand-offs and duplicated gate runs are what make a
+slice expensive.
+
 Take the PR to `To Review` via `kodi pr` — never to `Done`. On remote boards this
 is binding: `.claude/rules/ticket-completion.md` (In review + PR on finish; `Done`
 only on the user's explicit order).
@@ -102,5 +116,5 @@ only on the user's explicit order).
    orchestrator is spawned, every time.
 5. **Spawn `build-orchestrator`** with the ticket(s) + complement + the branch name
    (and the worktree path as its working directory, if one was created); it owns
-   the security bracket, the slice→gate loop, and the hand-off.
+   the slice→gate loop and the hand-off.
 6. **Relay** its result (the sub-agent's output is not shown to the human directly).
