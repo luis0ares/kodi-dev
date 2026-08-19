@@ -33,17 +33,24 @@ if (missing) {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** Poll `fn` until it yields a defined, non-false value or the deadline passes. */
+/**
+ * Poll `fn` until it yields a defined, non-false value or the deadline passes.
+ * `describe` is appended to the timeout error: a bare "timed out" tells whoever
+ * reads a CI log nothing, and the child's own output is the only trace there is.
+ */
 async function waitFor<T>(
   fn: () => T | undefined | Promise<T | undefined>,
   timeoutMs: number,
   interval = 200,
+  describe?: () => string,
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const v = await fn();
     if (v !== undefined && v !== false) return v as T;
-    if (Date.now() >= deadline) throw new Error('waitFor: timed out');
+    if (Date.now() >= deadline) {
+      throw new Error(`waitFor: timed out${describe ? ` — ${describe()}` : ''}`);
+    }
     await sleep(interval);
   }
 }
@@ -79,6 +86,21 @@ function tcpRefused(port: number): Promise<boolean> {
 
 let cli: ChildProcess | undefined;
 let fixture = '';
+/** Everything the CLI and the board child printed — the only evidence a CI run leaves. */
+let out = '';
+
+/** The child's liveness plus its captured output, for a failure message that says WHY. */
+function diagnostics(): string {
+  if (!cli) return 'CLI was never spawned';
+  const status =
+    cli.exitCode !== null || cli.signalCode !== null
+      ? `CLI already exited (code=${cli.exitCode}, signal=${cli.signalCode})`
+      : 'CLI still running';
+  return `${status}\ncaptured output:\n${out.trim() || '(nothing on stdout/stderr)'}`;
+}
+
+/** True once the CLI process is gone — used to fail fast instead of waiting out a deadline. */
+const cliDead = () => !!cli && (cli.exitCode !== null || cli.signalCode !== null);
 
 afterAll(() => {
   // Never leak a process or temp dir from the test itself, even on failure.
@@ -107,28 +129,43 @@ describe('kodi tickets serve — real launcher smoke (serve + clean teardown, no
         env: { PATH: process.env.PATH, HOME: process.env.HOME, KODI_NO_OPEN: '1' },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
-      let out = '';
       cli.stdout!.on('data', (d) => (out += d.toString()));
       cli.stderr!.on('data', (d) => (out += d.toString()));
 
-      // 1. Wait for the readiness line and parse the port (bounded ~30s).
-      const port = await waitFor(() => {
-        const m = /Board running at http:\/\/127\.0\.0\.1:(\d+)/.exec(out);
-        return m ? Number(m[1]) : undefined;
-      }, 30_000);
+      // 1. Wait for the readiness line and parse the port (bounded ~30s). The CLI
+      //    gives itself 15s to see the board listen and then exits, so a dead child
+      //    means the answer is already in `out` — fail now instead of sitting out
+      //    the rest of the deadline and blaming a timeout.
+      const port = await waitFor(
+        () => {
+          const m = /Board running at http:\/\/127\.0\.0\.1:(\d+)/.exec(out);
+          if (m) return Number(m[1]);
+          if (cliDead()) throw new Error(`the board never became ready — ${diagnostics()}`);
+          return undefined;
+        },
+        30_000,
+        200,
+        diagnostics,
+      );
       expect(port).toBeGreaterThan(0);
       expect(port).toBeLessThanOrEqual(65_535);
 
       // 2. HTTP 200 + board HTML markers. Next standalone has a brief post-"ready"
       //    window before it stably accepts, so retry the GET until it answers 200.
-      const resp = await waitFor(async () => {
-        try {
-          const r = await httpGet(`http://127.0.0.1:${port}`);
-          return r.status === 200 ? r : undefined;
-        } catch {
-          return undefined;
-        }
-      }, 20_000);
+      const resp = await waitFor(
+        async () => {
+          try {
+            const r = await httpGet(`http://127.0.0.1:${port}`);
+            return r.status === 200 ? r : undefined;
+          } catch {
+            if (cliDead()) throw new Error(`the board stopped serving — ${diagnostics()}`);
+            return undefined;
+          }
+        },
+        20_000,
+        200,
+        diagnostics,
+      );
       expect(resp.status).toBe(200);
       expect(resp.body).toContain('<html');
       expect(resp.body).toContain('kodi board'); // board shell rendered
@@ -140,10 +177,7 @@ describe('kodi tickets serve — real launcher smoke (serve + clean teardown, no
         cli!.once('exit', (code, signal) => res(code ?? (signal ? 0 : null))),
       );
       cli!.kill('SIGTERM');
-      await waitFor(
-        () => (cli!.exitCode !== null || cli!.signalCode !== null ? true : undefined),
-        15_000,
-      );
+      await waitFor(() => (cliDead() ? true : undefined), 15_000, 200, diagnostics);
       await exited;
       expect(cli!.exitCode !== null || cli!.signalCode !== null).toBe(true);
 
@@ -152,6 +186,8 @@ describe('kodi tickets serve — real launcher smoke (serve + clean teardown, no
       const closed = await waitFor(
         async () => ((await tcpRefused(port)) ? true : undefined),
         8_000,
+        200,
+        () => `the board child outlived the CLI (port ${port} still accepts) — ${diagnostics()}`,
       );
       expect(closed).toBe(true);
     },

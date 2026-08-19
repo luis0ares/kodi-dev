@@ -231,6 +231,7 @@ export function registerServeCommand(program: Command): void {
       await new Promise<void>((resolveAction) => {
         let settled = false;
         let shuttingDown = false;
+        let listening = false;
         let overrideCode: number | null = null;
         let forceTimer: NodeJS.Timeout | undefined;
 
@@ -284,6 +285,17 @@ export function registerServeCommand(program: Command): void {
         });
 
         child.on('exit', (code, signal) => {
+          // Died before it ever listened — name it. The board's own stderr is
+          // inherited, so the cause is printed right above this line, but without
+          // this the CLI exits having said nothing about the board at all, and a
+          // silent early exit is indistinguishable from a hang to whoever (or
+          // whatever CI job) is watching stdout for the readiness line.
+          if (!listening && !shuttingDown) {
+            process.stderr.write(
+              `board server exited before it started listening ` +
+                `(code=${code ?? 'null'}, signal=${signal ?? 'none'}).\n`,
+            );
+          }
           // Forward the child's exit code; a clean signal-kill (our teardown) is 0.
           const resolved = overrideCode ?? (code == null ? (signal ? 0 : 1) : code);
           finish(resolved);
@@ -294,6 +306,7 @@ export function registerServeCommand(program: Command): void {
         waitForListen(port, LISTEN_TIMEOUT_MS, () => settled)
           .then(() => {
             if (settled) return;
+            listening = true;
             const url = `http://127.0.0.1:${port}`;
             process.stdout.write(`Board running at ${url}. To stop the server, press Ctrl+C.\n`);
             // KODI_NO_OPEN lets CI/integration tests disable the real browser
