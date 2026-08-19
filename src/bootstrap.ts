@@ -36,7 +36,15 @@ board — there is no message bus.
 - \`/tickets\` — Generate board tickets from the consolidated plan (per phase, on
   demand) via the \`kodi tickets\` CLI.
 - \`/ticket-start\` — Build. Spawn the \`build-orchestrator\` sub-agent to drive one
-  ticket as a vertical slice; it closes only when every gate is green.
+  ticket as a vertical slice; it closes only when the gate is green.
+
+## On-demand skills (never auto-run inside a phase)
+
+- \`/security\` — audit a scope the HUMAN names (the diff, a path, a feature, the
+  whole project) for vulnerabilities; writes one \`docs/security/\` report per
+  confirmed breach.
+- \`/refactor <target>\` — behavior-preserving cleanup of a target the HUMAN
+  names, in small steps under a green suite. Never pick the target yourself.
 
 ## Tools
 
