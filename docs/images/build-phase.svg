@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 1210" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 1030" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
   <defs>
     <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#8a8aa0"/>
@@ -8,6 +8,9 @@
       .sub{fill:#f4f3fb;stroke:#c7c3e4;stroke-width:1.5;}
       .subt{fill:#6b63a6;font-size:14px;font-weight:700;}
       .agent{fill:#eceafd;stroke:#8a7fd4;stroke-width:1.5;}
+      .qa{fill:#f6f1e4;stroke:#c9a94e;stroke-width:1.5;}
+      .qan{fill:#8a6d1e;font-weight:600;text-anchor:middle;font-family:ui-monospace,Menlo,Consolas,monospace;}
+      .qat{fill:#a08540;font-size:11px;text-anchor:middle;}
       .hub{fill:#dcd9f7;stroke:#6f5fce;stroke-width:2;}
       .hubt{fill:#33285d;font-size:17px;font-weight:700;text-anchor:middle;}
       .hubs{fill:#6b63a6;font-size:12.5px;text-anchor:middle;}
@@ -22,41 +25,43 @@
       .edgeb{stroke:#7a6bd0;stroke-width:2.4;fill:none;}
       .elbl{fill:#50505f;font-size:12.5px;text-anchor:start;paint-order:stroke;stroke:#fdfdff;stroke-width:3.5px;stroke-linejoin:round;}
       .note{fill:#8a8698;font-size:11.5px;font-style:italic;text-anchor:middle;}
+      .aside{fill:#fbfaff;stroke:#c7c3e4;stroke-width:1.5;stroke-dasharray:6 4;}
+      .asidet{fill:#6b63a6;font-size:12.5px;text-anchor:middle;}
     </style>
   </defs>
-  <rect class="bg" x="0" y="0" width="840" height="1210"/>
+  <rect class="bg" x="0" y="0" width="840" height="1030"/>
 
-  <!-- group containers -->
-  <rect class="sub" x="168" y="466" width="504" height="156" rx="12"/>
-  <text class="subt" x="182" y="489">4 · implement · dependency order</text>
-  <text class="subt" x="182" y="507" font-size="12.5" font-weight="400" fill="#7a72a8">domain → use-case → API → schema → frontend</text>
-  <rect class="sub" x="128" y="726" width="584" height="128" rx="12"/>
-  <text class="subt" x="142" y="748">6 · gate — loop failures back to the owner</text>
+  <!-- implement group container -->
+  <rect class="sub" x="128" y="300" width="584" height="220" rx="12"/>
+  <text class="subt" x="142" y="323">2 · implement — one engineer owns its whole side</text>
+  <text class="subt" x="142" y="341" font-size="12.5" font-weight="400" fill="#7a72a8">code + tests + its OWN qa, in ONE context · both sides in parallel</text>
 
   <!-- edges -->
   <line class="edge" x1="420" y1="68" x2="420" y2="99" marker-end="url(#arw)"/>
   <line class="edgeb" x1="420" y1="160" x2="420" y2="207" marker-end="url(#arw)"/>
-  <text class="elbl" x="438" y="188">1 · read ticket, drivers, CLAUDE.md</text>
-  <line class="edge" x1="420" y1="263" x2="420" y2="293" marker-end="url(#arw)"/>
-  <text class="elbl" x="438" y="282">2 · branch + kodi tickets start</text>
-  <line class="edge" x1="420" y1="349" x2="420" y2="379" marker-end="url(#arw)"/>
-  <text class="elbl" x="438" y="368">3 · guidance: threat model + secure-coding</text>
-  <line class="edgeb" x1="420" y1="435" x2="420" y2="464" marker-end="url(#arw)"/>
-  <text class="elbl" x="438" y="455">4 · delegates</text>
-  <line class="edge" x1="420" y1="622" x2="420" y2="642" marker-end="url(#arw)"/>
-  <text class="elbl" x="438" y="636">5 · tests green → tidy</text>
-  <line class="edgeb" x1="420" y1="698" x2="420" y2="724" marker-end="url(#arw)"/>
-  <text class="elbl" x="438" y="716">6 · spawns</text>
-  <line class="edge" x1="420" y1="854" x2="420" y2="884" marker-end="url(#arw)"/>
-  <line class="edge" x1="420" y1="1000" x2="420" y2="1032" marker-end="url(#arw)"/>
-  <text class="elbl" x="438" y="1020">yes</text>
-  <line class="edge" x1="420" y1="1086" x2="420" y2="1116" marker-end="url(#arw)"/>
-  <text class="elbl" x="438" y="1105">kodi pr create · kodi tickets hand-off</text>
+  <text class="elbl" x="438" y="188">1 · scout ONCE: ticket, CLAUDE.md, rules, touch points</text>
+  <line class="edgeb" x1="420" y1="263" x2="420" y2="298" marker-end="url(#arw)"/>
+  <text class="elbl" x="438" y="286">2 · Slice Brief → delegates</text>
+  <line class="edgeb" x1="420" y1="520" x2="420" y2="548" marker-end="url(#arw)"/>
+  <text class="elbl" x="438" y="541">3 · per-criterion verdicts + side gates</text>
+  <line class="edge" x1="420" y1="610" x2="420" y2="638" marker-end="url(#arw)"/>
+  <line class="edge" x1="420" y1="742" x2="420" y2="770" marker-end="url(#arw)"/>
+  <text class="elbl" x="438" y="762">yes</text>
+  <line class="edge" x1="420" y1="826" x2="420" y2="854" marker-end="url(#arw)"/>
+  <text class="elbl" x="438" y="846">kodi pr create · kodi tickets hand-off</text>
 
-  <!-- loop back: close -> BO -->
-  <path class="edge" d="M320,940 C 120,940 84,860 84,560 C 84,300 150,150 258,138" marker-end="url(#arw)"/>
-  <text class="elbl" x="96" y="560" text-anchor="middle">no ·</text>
-  <text class="elbl" x="96" y="576" text-anchor="middle">loop back</text>
+  <!-- each engineer invokes its own QA -->
+  <line class="edge" x1="275" y1="410" x2="275" y2="438" marker-end="url(#arw)"/>
+  <text class="elbl" x="196" y="431" font-size="11">invokes · fixes</text>
+  <line class="edge" x1="565" y1="410" x2="565" y2="438" marker-end="url(#arw)"/>
+  <text class="elbl" x="486" y="431" font-size="11">invokes · fixes</text>
+
+  <!-- loop back: not green -> owning engineer -->
+  <path class="edge" d="M280,690 C 130,690 84,640 84,470 C 84,300 150,160 256,140" marker-end="url(#arw)"/>
+  <text class="elbl" x="96" y="486" text-anchor="middle">no ·</text>
+  <text class="elbl" x="96" y="502" text-anchor="middle">back to the</text>
+  <text class="elbl" x="96" y="518" text-anchor="middle">owning engineer</text>
+  <text class="elbl" x="96" y="534" text-anchor="middle">(max 2 rounds)</text>
 
   <!-- ============ nodes ============ -->
   <!-- ticket-start -->
@@ -66,57 +71,52 @@
   <!-- build-orchestrator hub -->
   <rect class="hub" x="260" y="100" width="320" height="60" rx="12"/>
   <text class="hubt" x="420" y="127">build-orchestrator</text>
-  <text class="hubs" x="420" y="147">hub · the only coordinator</text>
+  <text class="hubs" x="420" y="147">hub · owns the whole · declares green</text>
 
-  <!-- 1 context -->
+  <!-- 1 slice brief -->
   <rect class="agent" x="270" y="209" width="300" height="54" rx="10"/>
-  <text class="name" x="420" y="242" font-size="15">context</text>
-  <!-- 2 slice branch -->
-  <rect class="agent" x="270" y="295" width="300" height="54" rx="10"/>
-  <text class="name" x="420" y="328" font-size="15">slice branch · In progress</text>
-  <!-- 3 security guidance -->
-  <rect class="agent" x="270" y="381" width="300" height="54" rx="10"/>
-  <text class="name" x="420" y="410" font-size="15">security</text>
-  <text class="tag" x="420" y="427">guidance pass</text>
+  <text class="name" x="420" y="234" font-size="15">Slice Brief</text>
+  <text class="tag" x="420" y="252">written once · nobody re-scouts</text>
 
-  <!-- 4 implement group nodes -->
-  <rect class="agent" x="196" y="524" width="210" height="42" rx="9"/>
-  <text class="name" x="301" y="550" font-size="13.5">backend-engineer</text>
-  <rect class="agent" x="434" y="524" width="210" height="42" rx="9"/>
-  <text class="name" x="539" y="550" font-size="13.5">frontend-engineer</text>
-  <rect class="agent" x="196" y="574" width="210" height="42" rx="9"/>
-  <text class="name" x="301" y="600" font-size="13.5">backend-tester</text>
-  <rect class="agent" x="434" y="574" width="210" height="42" rx="9"/>
-  <text class="name" x="539" y="600" font-size="13.5">frontend-tester</text>
+  <!-- 2 engineers + their QAs -->
+  <rect class="agent" x="160" y="354" width="230" height="56" rx="9"/>
+  <text class="name" x="275" y="379" font-size="13.5">backend-engineer</text>
+  <text class="tag" x="275" y="397">domain · API · tests</text>
+  <rect class="agent" x="450" y="354" width="230" height="56" rx="9"/>
+  <text class="name" x="565" y="379" font-size="13.5">frontend-engineer</text>
+  <text class="tag" x="565" y="397">UI · tests · E2E</text>
+  <rect class="qa" x="160" y="438" width="230" height="60" rx="9"/>
+  <text class="qan" x="275" y="461" font-size="13.5">backend-qa</text>
+  <text class="qat" x="275" y="478">per criterion: met / met differently</text>
+  <text class="qat" x="275" y="492">/ not met · backend gate once</text>
+  <rect class="qa" x="450" y="438" width="230" height="60" rx="9"/>
+  <text class="qan" x="565" y="461" font-size="13.5">frontend-qa</text>
+  <text class="qat" x="565" y="478">same verdicts + design system,</text>
+  <text class="qat" x="565" y="492">states, a11y · frontend gate once</text>
 
-  <!-- 5 refactor -->
-  <rect class="agent" x="270" y="644" width="300" height="54" rx="10"/>
-  <text class="name" x="420" y="670" font-size="15">refactor-engineer</text>
-  <text class="tag" x="420" y="687">behavior-preserving · commit at each green</text>
+  <!-- 3 cross-side check -->
+  <rect class="agent" x="240" y="548" width="360" height="62" rx="10"/>
+  <text class="name" x="420" y="573" font-size="15">cross-side check</text>
+  <text class="tag" x="420" y="591">same contract · every criterion claimed</text>
+  <text class="tag" x="420" y="605">deviations judged · integration/E2E once</text>
 
-  <!-- 6 gate group nodes -->
-  <rect class="agent" x="148" y="770" width="200" height="56" rx="9"/>
-  <text class="name" x="248" y="795" font-size="13.5">qa-implementation</text>
-  <text class="tag" x="248" y="812">DoD gate</text>
-  <rect class="agent" x="366" y="770" width="150" height="56" rx="9"/>
-  <text class="name" x="441" y="795" font-size="13.5">qa-visual</text>
-  <text class="tag" x="441" y="812">frontend only</text>
-  <rect class="agent" x="534" y="770" width="160" height="56" rx="9"/>
-  <text class="name" x="614" y="795" font-size="13.5">security</text>
-  <text class="tag" x="614" y="812">verify pass</text>
+  <!-- 4 green decision -->
+  <polygon class="dec" points="420,638 560,690 420,742 280,690"/>
+  <text class="dect" x="420" y="686">4 · green?</text>
+  <text class="dect" x="420" y="703">the orchestrator's call</text>
 
-  <!-- 7 close decision -->
-  <polygon class="dec" points="420,884 560,940 420,996 280,940"/>
-  <text class="dect" x="420" y="930">7 · all green &amp;</text>
-  <text class="dect" x="420" y="947">no Critical / High?</text>
-
-  <!-- 8 hand-off -->
-  <rect class="agent" x="320" y="1032" width="200" height="54" rx="10"/>
-  <text class="name" x="420" y="1065" font-size="15">8 · hand-off</text>
+  <!-- 5 hand-off -->
+  <rect class="agent" x="320" y="770" width="200" height="56" rx="10"/>
+  <text class="name" x="420" y="804" font-size="15">5 · hand-off</text>
 
   <!-- PR doc -->
-  <path fill="#fff9ec" stroke="#cbb26a" stroke-width="1.5" d="M310,1116 h206 l14,14 v42 h-220 z"/>
-  <path fill="none" stroke="#cbb26a" stroke-width="1.5" d="M516,1116 v14 h14"/>
-  <text class="doct" x="417" y="1149">PR · To Review</text>
-  <text class="note" x="420" y="1192">never moved to Done — the human's call on merge</text>
+  <path fill="#fff9ec" stroke="#cbb26a" stroke-width="1.5" d="M310,854 h206 l14,14 v42 h-220 z"/>
+  <path fill="none" stroke="#cbb26a" stroke-width="1.5" d="M516,854 v14 h14"/>
+  <text class="doct" x="417" y="887">PR · To Review</text>
+  <text class="note" x="420" y="930">accepted deviations recorded in the body — never moved to Done</text>
+
+  <!-- aside: human-invoked skills, outside the slice -->
+  <rect class="aside" x="128" y="950" width="584" height="54" rx="12"/>
+  <text class="asidet" x="420" y="972" font-weight="700">outside the slice — human-invoked, never spawned by the orchestrator</text>
+  <text class="asidet" x="420" y="991" font-family="ui-monospace,Menlo,Consolas,monospace">/security &lt;scope&gt;   ·   /refactor &lt;target&gt;</text>
 </svg>

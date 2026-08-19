@@ -40,8 +40,9 @@ make install               # build + install the kodi binary globally from sourc
 - wires a **`SessionStart` hook** (matchers `startup | resume | clear | compact`) to
   `kodi hook session-start`, which injects the orchestrator persona + the two laws
   (ask-never-assume, ADR-is-law) into every session;
-- installs the **phase skills** (`/discover`, `/oplan`, `/tickets`, `/ticket-start`, …),
-  the **sub-agents**, and a `docs/` scaffold;
+- installs the **phase skills** (`/discover`, `/oplan`, `/tickets`, `/ticket-start`, …)
+  plus the on-demand ones (`/security`, `/refactor`), the **sub-agents**, and a `docs/`
+  scaffold;
 - configures your **board provider**, and writes `.claude/kodi-dev.yaml` — every field
   it can write, and every field it can't, is listed in full in [Configuration
   reference](#configuration-reference-kodi-devyaml) below.
@@ -54,9 +55,12 @@ skills of your current kodi version, and local edits to them are replaced), and 
 `env` defaults — is re-asserted, restoring anything that was deleted or edited away.
 
 Everything kodi does **not** ship is left alone: your own agents and skills, your own
-hooks, permission rules and env vars all survive a re-run untouched. Files from a
-previous kodi version that the current one no longer ships are not deleted either —
-remove those by hand if you want a clean `.claude/agents` / `.claude/skills`.
+hooks, permission rules and env vars all survive a re-run untouched. Agents a previous
+kodi shipped and the current one **retired** (`backend-tester`, `frontend-tester`,
+`refactor-engineer`, `security` — merged into the engineers or turned into the
+`/security` and `/refactor` skills — plus `qa-implementation` and `qa-visual`, renamed
+to `backend-qa` and `frontend-qa`) ARE deleted on re-run, so an upgraded project ends up
+with exactly the current roster.
 
 ### Choose a board provider
 
@@ -188,7 +192,8 @@ can be re-run or resumed after a `/clear` or `/compact`.
 | Briefing  | `/discover`              | main-loop                        | `briefing.md` + thin `CLAUDE.md` |
 | Planning  | `/oplan`, `/oreplan`     | main-loop (hub-and-spoke)        | phased plan in `docs/plan`       |
 | Ticketing | `/tickets`, `/retickets` | main-loop → CLI                  | tickets on the board             |
-| Build     | `/ticket-start`          | `build-orchestrator` (sub-agent) | vertical slice → gates → PR      |
+| Build     | `/ticket-start`          | `build-orchestrator` (sub-agent) | vertical slice → gate → PR       |
+| On demand | `/security`, `/refactor` | main-loop                        | audit reports / a tidied target  |
 
 Engineers know their **role**, not your stack — the stack lives in the thin `CLAUDE.md`
 and in installable **skill-packs** (`kodi add`).
@@ -308,5 +313,7 @@ kodi init                    # once per project — wires the harness + board
 /discover                    # → briefing.md + thin CLAUDE.md
 /oplan                       # → phased plan in docs/plan
 /tickets                     # → tickets on the board
-/ticket-start KODI-001       # → build one slice, gates, PR to To Review
+/ticket-start KODI-001       # → build one slice, gate, PR to To Review
+/security diff               # → audit a scope you name → docs/security/ reports
+/refactor src/api/users.ts   # → behavior-preserving cleanup of a target you name
 ```

@@ -21,7 +21,8 @@ Two laws hold across every phase:
 | 1 Briefing  | `/discover`          | main-loop (on the main thread)   | `briefing.md` + thin `CLAUDE.md`   |
 | 2 Planning  | `/oplan`, `/oreplan` | main-loop (hub-and-spoke)        | phased plan in `docs/plan`         |
 | — Ticketing | `/tickets`, `/retickets` | main-loop → CLI              | tickets on the active board        |
-| 3 Build     | `/ticket-start`      | `build-orchestrator` (sub-agent) | vertical slice → gates → PR        |
+| 3 Build     | `/ticket-start`      | `build-orchestrator` (sub-agent) | vertical slice → gate → PR         |
+| — On demand | `/security`, `/refactor` | main-loop (no sub-agents)    | audit reports / a tidied target    |
 
 ---
 
@@ -107,40 +108,53 @@ from `/oreplan`).
 ## Phase 3 — Build (`/ticket-start`)
 
 **Goal:** drive **one** backlog ticket end-to-end as a **vertical slice**. Here the hub
-is a sub-agent — **`build-orchestrator`** — spawned by `/ticket-start`. It owns the
-branch, brackets the slice with security, delegates to engineers/testers/gates in
-dependency order, and closes only when every gate is green. It coordinates; it never
+is a sub-agent — **`build-orchestrator`** — spawned by `/ticket-start`. It scouts the
+slice once, delegates one engineer per side, verifies the sides fit together, and is the
+**only** agent that declares the ticket green. It coordinates and judges; it never
 writes feature code, tests, or reviews itself.
 
-![Build phase: build-orchestrator hub drives one slice through context, branch, security guidance, implementation, refactor, gates, and hand-off to a PR in To Review](images/build-phase.svg)
+![Build phase: build-orchestrator scouts the slice once and delegates to the backend and frontend engineers, each of which owns its code, tests and its own QA agent, then the orchestrator verifies the sides fit, declares the ticket green and hands off a PR in To Review](images/build-phase.svg)
 
 **Agents**
 
-- **`build-orchestrator`** (hub) — the only coordinator; delegates in dependency order,
-  runs the security bracket, loops gate failures back to the owning agent, and hands off.
-- **`backend-engineer` / `frontend-engineer`** — write feature code in the project's
-  recorded stack, respecting the `data-engineer` and `component-engineer` specs.
-- **`backend-tester` / `frontend-tester`** — write the test suites (unit, integration,
-  component, E2E) against the implemented behavior; they never change behavior to pass.
-- **`refactor-engineer`** — the last implementation step, run **only once tests are
-  green**: a behavior-preserving tidy (naming, duplication, long functions, dead code)
-  in small steps, committed at each green safe state.
-- **`qa-implementation`** — the Definition-of-Done gate: runs the full gate
-  (lint / type-check / tests / coverage) and reviews the diff; blocks until it passes.
-- **`qa-visual`** — the visual/UX gate (frontend slices only): fidelity to the design
-  system, empty/loading/error states, responsiveness, accessibility.
-- **`security`** — brackets the slice, run **twice**: a *guidance* pass before code
-  (threat model + secure-coding requirements) and a *verify* pass at the gate (audits
-  diff, dependencies, images, secrets), hard-gating on Critical/High findings.
+- **`build-orchestrator`** (hub) — scouts the slice ONCE and writes the Slice Brief every
+  sub-agent works from, spawns only the side(s) the slice needs, then does what no single
+  engineer can see: that the two sides speak the same contract, that every acceptance
+  criterion is claimed by somebody, and that the cross-side check is clean. **Declaring
+  the ticket green — and only then opening the PR and handing off — is its call and
+  nobody else's.** Failures route back to the owning engineer, capped at 2 rounds.
+- **`backend-engineer` / `frontend-engineer`** — each owns **one side end to end**: the
+  feature code, its unit/integration/component/E2E tests, and its own QA loop, in a
+  single context. Code and tests are never split across agents — that split is what made
+  a slice slow, expensive and context-poor. Both report to the orchestrator.
+- **`backend-qa` / `frontend-qa`** — each is invoked by **its own engineer**, not by the
+  orchestrator, and answers to that engineer. Each verifies **criterion by criterion**
+  that the side actually meets the ticket, runs that side's gate once, and returns one of
+  three verdicts per criterion:
+  - **MET** — built as specified and asserted by a test.
+  - **MET DIFFERENTLY** — the goal is reached another way, allowed **only** with a
+    convincing, evidenced justification: what the ticket asked verbatim, what was built,
+    the proof it achieves the same goal, and why the literal wording was impossible.
+    Missing any of the four makes it NOT MET. Every accepted deviation is carried up to
+    the orchestrator and into the PR body.
+  - **NOT MET** — missing, wrong or unasserted. Blocking, routed back to the engineer.
 
-**Close condition & hand-off.** The slice closes ONLY when every gate is green, there is
-no open Critical/High security finding, and `qa-implementation` (and `qa-visual`, if the
-slice touched frontend) are positive. On close, the orchestrator opens a
-**template-validated PR** to **`To Review`** via `kodi pr` and runs `kodi tickets
-hand-off`. If the security verify pass wrote reports under `docs/security/`, they are
-referenced so follow-up tickets can be authored from them. The ticket is **never**
-moved to `Done` — that is the human's call on merge,
-binding policy in `.claude/rules/ticket-completion.md`.
+  `frontend-qa` additionally owns the visual/UX check: design-system fidelity,
+  empty/loading/error states, responsiveness, accessibility.
+
+**Not in the slice.** Security auditing and refactoring are **human-invoked skills**, not
+build steps: **`/security`** hunts vulnerabilities in a scope *you* name (the diff, a
+path, a feature, the whole project) and writes one `docs/security/` report per confirmed
+breach; **`/refactor`** cleans up a target *you* name, behavior-preservingly, in small
+committed steps under a green suite. The orchestrator never spawns either — it only
+flags in its report when a slice surfaced something worth one.
+
+**Close condition & hand-off.** The ticket is green when every criterion is MET or an
+accepted MET DIFFERENTLY, both QA verdicts passed, and the orchestrator's cross-side
+check is clean. On that call, the orchestrator opens a **template-validated PR** to
+**`To Review`** via `kodi pr` — recording every accepted deviation in the body — and runs
+`kodi tickets hand-off`. The ticket is **never** moved to `Done`: that is the human's
+call on merge, binding policy in `.claude/rules/ticket-completion.md`.
 
 ---
 
