@@ -1,167 +1,148 @@
 # kodi agents & orchestration
 
-kodi ships a **neutral team of sub-agents** and drives them through three explicit
-phases. There is **no auto-advancing pipeline and no message bus** — a human runs
-one skill per phase, and the orchestrator coordinates the agents directly, producing
-durable artifacts that the next phase reads.
+kodi ships a **small, neutral team of sub-agents** and drives them through five explicit
+commands. There is **no auto-advancing pipeline and no message bus** — a human runs one
+command at a time, the main-loop grills them on the main thread, and one writer sub-agent
+per command produces durable artifacts the next command reads.
 
 Every agent knows its **role**, not your stack. The stack lives in a thin `CLAUDE.md`
-(written during Briefing) and in installable **skill-packs** (`kodi add`), so the same
-engineer agent builds a FastAPI service or a Next.js app without being rewritten.
+(written during discovery) and in installable **skill-packs** (`kodi add`), so the same
+engineer agent builds a FastAPI service or a Next.js app without being rewritten. No agent
+pins a model: every sub-agent inherits the session's model.
 
-Two laws hold across every phase:
+Three laws hold across every command:
 
-- **Ask, never assume.** Every genuine decision (mode, scope, an ADR change, a gate
-  that needs a human call) goes to the human.
-- **ADR is law.** Approved decisions are followed; changing one stops the flow and
-  surfaces it — never silently overridden.
+- **Ask, never assume.** Every genuine decision (mode, scope, an ADR change, a ticket
+  table, a deviation from a criterion) goes to the human.
+- **ADR is law.** Approved decisions are followed; changing or accepting one is the
+  human's call.
+- **The owner's words are the anchor.** A user story or a discovery answer is copied
+  verbatim into the brief and the artifact. Nothing is paraphrased between the prompt
+  and the ticket.
 
-| Phase       | Skill(s)             | Who orchestrates                 | Output                             |
-| ----------- | -------------------- | -------------------------------- | ---------------------------------- |
-| 1 Briefing  | `/discover`          | main-loop (on the main thread)   | `briefing.md` + thin `CLAUDE.md`   |
-| 2 Planning  | `/oplan`, `/oreplan` | main-loop (hub-and-spoke)        | phased plan in `docs/plan`         |
-| — Ticketing | `/tickets`, `/retickets` | main-loop → CLI              | tickets on the active board        |
-| 3 Build     | `/ticket-start`      | `build-orchestrator` (sub-agent) | vertical slice → gate → PR         |
-| — On demand | `/security`, `/refactor` | main-loop (no sub-agents)    | audit reports / a tidied target    |
-
----
-
-## Phase 1 — Briefing (`/discover`)
-
-**Goal:** establish shared context *before* any planning. The main-loop is the only
-one that talks to the human; the WU ("work-up") agents only investigate and report —
-they never interview.
-
-![Briefing phase: main-loop grills the human, brownfield/greenfield work-up agents investigate, brief synthesizes briefing.md + thin CLAUDE.md](images/briefing-phase.svg)
-
-**Agents**
-
-- **`brownfield-wu`** — runs only when code already exists. Scouts the repository and
-  returns a ground-truth technical map: stack, architecture, patterns, integrations,
-  test/coverage state, tech debt. It investigates; it does not interview.
-- **`greenfield-wu`** — for new projects. Reads whatever seed material the human points
-  to (docs, mockups, sample data, links, loose specs) and researches the domain,
-  returning facts that ground the interview. Skipped when there is nothing to read.
-- **`brief`** — the synthesizer, run at the end. Consumes the main-thread grill notes
-  plus the WU reports and writes the two artifacts: `briefing.md` (root, transient —
-  consumed by `/oplan`) and a thin `CLAUDE.md` (identity, stack or `TBD`, provider,
-  gate commands, skill-packs, doc locations).
-
-**Communication:** the WU agents run in parallel and return reports to the main-loop;
-the main-loop reconciles them against the grill, raises open questions with the human,
-then hands everything to `brief`. Coordination is direct — reports and file paths, no
-shared bus.
+| Command                    | Grilling                     | Writer                 | Output                                                                     |
+| -------------------------- | ---------------------------- | ---------------------- | -------------------------------------------------------------------------- |
+| `/kodi.discover`           | main-loop, topic by topic    | `discover-writer`      | thin `CLAUDE.md`, one rule per convention, PRD 0000, founding ADRs; brownfield: as-built PRDs and ADRs |
+| `/kodi.plan <user story>`  | main-loop, five questions    | `plan-writer`          | `docs/prd/NNNN-<slug>.md` + `docs/plan/NNNN-<slug>.md`, ADR only when forced |
+| `/kodi.clarify <prd>`      | main-loop, five questions    | `plan-writer`          | answers in `## Clarifications`, ambiguous sentences replaced               |
+| `/kodi.tasks <prd>`        | main-loop approves the table | `tasks-writer`         | `docs/plan/NNNN-<slug>.tasks.md`, one ticket per user story on the board   |
+| `/kodi.build <ticket>`     | —                            | `build-orchestrator`   | `ui-designer` → engineers with their own QA → PR in To Review              |
+| `/kodi.security`, `/kodi.refactor` | —                    | main-loop              | audit reports / a tidied target                                            |
 
 ---
 
-## Phase 2 — Planning (`/oplan`)
+## `/kodi.discover`
 
-**Goal:** turn `briefing.md` into a consolidated, MVP-first phased plan. The main-loop
-runs a **hub-and-spoke** loop: for each *manager* it spawns the manager, which returns
-a plan naming the *leaves* it needs; the **hub (main-loop) spawns the leaves** — managers
-never spawn their own — then the manager validates the leaves' outputs for coherence.
+**Goal:** establish the durable context every later command reads. The main-loop is the
+only one that talks to the human.
 
-![Planning phase: detail writes the PRD, the main-loop hub spawns the architecture and UX subtrees in parallel, then phases and qa-planning gate into docs/plan](images/planning-phase.svg)
+- **`discover-investigator`** (brownfield only) — runs *before* the grilling. Maps every
+  project and its stack, the modules, the decisions the code already took (tenancy, auth,
+  async, layout, persistence, deploy), the existing docs and how far they still match the
+  code, the gates and conventions, and what is half-built. Returns a map whose **Gaps**
+  seed the grilling. Read-only.
+- **The grilling** covers problem, users, how they work today, constraints, destination
+  and — greenfield — the stack choices; brownfield — how the team works and which
+  existing docs are still true. One question at a time, recommended answer first.
+- **The human approves the artifact list** before anything is written.
+- **`discover-writer`** writes the approved list from the verbatim answers and the map:
+  the thin `CLAUDE.md` (or a diff when one exists), one `.claude/rules/` file per
+  convention, `docs/prd/0000-product-vision.md`, the founding ADRs and, on brownfield,
+  one as-built PRD per module and one ADR per decision found. It never rewrites an
+  `Accepted` document and never writes `briefing.md`.
 
-**Order:** `detail` (PRD, human sign-off) → `architect` ∥ `ux-lead` (parallel,
-sealed-bid; the hub reconciles cross-review and surfaces conflicts) → `phases`
-(split into MVP-first phases) → `qa-planning` (validation gate). Loop until the gate
-passes, then write `docs/plan` for human review.
+## `/kodi.plan <user story>`
 
-**Agents**
+**Goal:** one feature, one PRD, one plan — spec-kit's `specify` + `plan` in one pass.
 
-- **`detail`** — authors the PRD from the briefing: the scope anchor everything
-  downstream traces to. Human signs it off before architecture/UX begin.
-- **`architect`** (manager) — plans the architecture work and later validates it; owns
-  two leaves: **`system-architect`** (drafts decision-ready ADRs; never self-approves)
-  and **`data-engineer`** (authoritative data model — entities, relationships,
-  constraints, migrations — as a spec the backend later implements).
-- **`ux-lead`** (manager) — plans the UX work and later validates it; owns three
-  leaves: **`researcher`** (user flows and journeys from the PRD), **`brand`** (visual
-  tone and direction), and **`component-engineer`** (the design system — tokens,
-  component contracts, layout, a11y — as an authoritative spec the frontend executes).
-- **`phases`** — splits the consolidated plan into MVP-first phases with dependencies
-  and per-phase deliverables.
-- **`qa-planning`** — the independent validation gate. Checks that every requirement
-  traces through to a phase, with no orphans or placeholders, and blocks until the plan
-  coheres.
+- The user story typed after the command is copied **verbatim**; it becomes
+  `## In the owner's words` at the top of the PRD.
+- The main-loop asks **at most five questions** before anything is written, each with
+  the quoted sentence that admits two readings, concrete options and a recommendation.
+- **`plan-writer`** writes:
+  - `docs/prd/NNNN-<slug>.md` — short prose: users and stories (P1, P2 …), requirements
+    `R-nnn`, permissions and tenancy in full sentences, edge cases, non-goals,
+    assumptions, and at most three inline `[NEEDS CLARIFICATION: …]` markers. Under 200
+    lines; longer means two features.
+  - `docs/plan/NNNN-<slug>.md` — **caveman**: no articles, no filler, exact paths and
+    names. Data, backend, frontend, contract, tests, the rules that bind, risks, open
+    items. Under 150 lines.
+  - an ADR only when the feature binds code outside itself and no ADR already decides
+    it. An accepted ADR that forbids the story stops the command.
+- The human approves the PRD and the plan and accepts the ADR. An open marker blocks
+  approval.
 
-> **`/oreplan <phase>`** re-plans or expands a **single** phase in `docs/plan` when new
-> context arrives — it runs the same sub-loop scoped to one phase, shows the diff for
-> sign-off, and never touches the board. If tickets already exist for that phase it flags
-> the delta and hands it to `/retickets`.
+## `/kodi.clarify <prd>`
 
----
+**Goal:** close what the plan left open, as many times as needed.
 
-## Ticketing (`/tickets`)
+- **`plan-writer`** in CLARIFY mode scans the PRD and the plan across scope, data, UX
+  flow and states, non-functional, integrations, edge cases, terminology and completion
+  criteria; open markers first. It returns at most five questions.
+- The main-loop asks them one at a time; each answer goes to `## Clarifications` and
+  replaces the ambiguous sentence in the PRD or the plan. No obsolete text survives.
 
-Between planning and building, `/tickets` turns a consolidated phase into actionable
-board tickets — one phase at a time, on demand. It is not an agent phase: the main-loop
-drives the **`kodi tickets` CLI**, which validates the ticket template and proxies the
-active provider. Each ticket traces to its drivers (PRD / ADR / security) and declares
-its dependencies so `kodi tickets list-ready` reflects the real order. **`/retickets`**
-is its sibling: it revises *existing* tickets impact-first (and receives phase deltas
-from `/oreplan`).
+## `/kodi.tasks <prd>`
 
----
+**Goal:** from an approved spec to the board — spec-kit's `tasks` + tasks-to-issues.
 
-## Phase 3 — Build (`/ticket-start`)
+- Refuses a Draft PRD, an open marker, a `Proposed` ADR, or a PRD that already has live
+  tickets.
+- **`tasks-writer`** derives by rule: a foundation ticket when the plan changes data, one
+  vertical-slice ticket per user story, backend before frontend unless one cannot be
+  tested without the other, a closing full-gate ticket last. Every `R-nnn` lands in a
+  ticket; acceptance criteria are the requirement text verbatim; the ticket summary
+  carries the owner's words, the plan path, the files, the pattern, the contract and
+  the `T0nn [P] [US1]` steps. It writes `docs/plan/NNNN-<slug>.tasks.md`.
+- The main-loop shows the ticket table, the requirement-to-ticket matrix (**Uncovered**,
+  **Orphan**) and **Owner's words not served**. The human approves the table; only then
+  does the main-loop run `kodi tickets create … --iteration "$ITERATION" --yes` in
+  dependency order.
 
-**Goal:** drive **one** backlog ticket end-to-end as a **vertical slice**. Here the hub
-is a sub-agent — **`build-orchestrator`** — spawned by `/ticket-start`. It scouts the
-slice once, delegates one engineer per side, verifies the sides fit together, and is the
-**only** agent that declares the ticket green. It coordinates and judges; it never
-writes feature code, tests, or reviews itself.
+## `/kodi.build <ticket>`
 
-![Build phase: build-orchestrator scouts the slice once and delegates to the backend and frontend engineers, each of which owns its code, tests and its own QA agent, then the orchestrator verifies the sides fit, declares the ticket green and hands off a PR in To Review](images/build-phase.svg)
+**Goal:** one ticket, one vertical slice, one PR in To Review.
 
-**Agents**
+- The main-loop runs `kodi tickets start <key> --yes` (branch or worktree), then spawns
+  **`build-orchestrator`**.
+- **`build-orchestrator`** scouts once — the ticket, the plan sections it names, the
+  design-system headings, `CLAUDE.md`, the rules, the actual files — and writes the
+  **Slice Brief** every sub-agent works from: owner's words, criteria numbered, `T0nn`
+  steps, touch points, pattern, contract, scoped commands. It triages the roster and
+  never writes feature code.
+- **`ui-designer`** runs *before* the frontend engineer whenever rendered output
+  changes. It composes the primitives (`shadcn`, `frontend-design`) and returns
+  components plus a short spec: props, states, variants, responsive and a11y behaviour.
+- **`backend-engineer`** / **`frontend-engineer`** each own their side end to end: code,
+  tests, and their own QA loop. Each invokes **`backend-qa`** / **`frontend-qa`**
+  itself; the QA verifies criterion by criterion (MET, MET DIFFERENTLY with proof, NOT
+  MET) with a scoped regression over the diff, never the full gate.
+- **MET DIFFERENTLY is the human's call.** The orchestrator surfaces it with the
+  criterion, the owner's words, what was built and the proof, and waits. Only an
+  accepted deviation goes into the PR body.
+- The orchestrator verifies the sides fit the same contract and every criterion is
+  claimed, then opens the PR with `kodi pr create` and runs `kodi tickets hand-off`.
+  Never `Done` — that is the human's sign-off on merge.
 
-- **`build-orchestrator`** (hub) — scouts the slice ONCE and writes the Slice Brief every
-  sub-agent works from, spawns only the side(s) the slice needs, then does what no single
-  engineer can see: that the two sides speak the same contract, that every acceptance
-  criterion is claimed by somebody, and that the cross-side check is clean. **Declaring
-  the ticket green — and only then opening the PR and handing off — is its call and
-  nobody else's.** Failures route back to the owning engineer, capped at 2 rounds.
-- **`backend-engineer` / `frontend-engineer`** — each owns **one side end to end**: the
-  feature code, its unit/integration/component/E2E tests, and its own QA loop, in a
-  single context. Code and tests are never split across agents — that split is what made
-  a slice slow, expensive and context-poor. Both report to the orchestrator.
-- **`backend-qa` / `frontend-qa`** — each is invoked by **its own engineer**, not by the
-  orchestrator, and answers to that engineer. Each verifies **criterion by criterion**
-  that the side actually meets the ticket, runs that side's gate once, and returns one of
-  three verdicts per criterion:
-  - **MET** — built as specified and asserted by a test.
-  - **MET DIFFERENTLY** — the goal is reached another way, allowed **only** with a
-    convincing, evidenced justification: what the ticket asked verbatim, what was built,
-    the proof it achieves the same goal, and why the literal wording was impossible.
-    Missing any of the four makes it NOT MET. Every accepted deviation is carried up to
-    the orchestrator and into the PR body.
-  - **NOT MET** — missing, wrong or unasserted. Blocking, routed back to the engineer.
+## On demand — `/kodi.security`, `/kodi.refactor`
 
-  `frontend-qa` additionally owns the visual/UX check: design-system fidelity,
-  empty/loading/error states, responsiveness, accessibility.
+Neither is a build step. `/kodi.security` audits a scope the human names and writes one
+`docs/security/` report per confirmed breach. `/kodi.refactor <target>` cleans up a
+target the human names, behavior-preservingly, in small steps under a green suite.
 
-**Not in the slice.** Security auditing and refactoring are **human-invoked skills**, not
-build steps: **`/security`** hunts vulnerabilities in a scope *you* name (the diff, a
-path, a feature, the whole project) and writes one `docs/security/` report per confirmed
-breach; **`/refactor`** cleans up a target *you* name, behavior-preservingly, in small
-committed steps under a green suite. The orchestrator never spawns either — it only
-flags in its report when a slice surfaced something worth one.
+## How the commands connect
 
-**Close condition & hand-off.** The ticket is green when every criterion is MET or an
-accepted MET DIFFERENTLY, both QA verdicts passed, and the orchestrator's cross-side
-check is clean. On that call, the orchestrator opens a **template-validated PR** to
-**`To Review`** via `kodi pr` — recording every accepted deviation in the body — and runs
-`kodi tickets hand-off`. The ticket is **never** moved to `Done`: that is the human's
-call on merge, binding policy in `.claude/rules/ticket-completion.md`.
+```
+/kodi.discover ─► CLAUDE.md · rules · PRD 0000 · ADRs
+      │
+/kodi.plan <story> ─► docs/prd/NNNN · docs/plan/NNNN · (ADR)      ◄─┐ human approves
+      │                                                             │
+/kodi.clarify NNNN ─► markers closed, sentences replaced ───────────┘
+      │
+/kodi.tasks NNNN ─► docs/plan/NNNN.tasks.md · tickets on the board   ◄── human approves the table
+      │
+/kodi.build <key> ─► slice · scoped regression · PR in To Review     ◄── human merges to Done
+```
 
----
-
-## How the phases connect
-
-![How the phases connect: Briefing to Planning to Ticketing to Build, each hand-off a durable artifact, ending in a human merge to Done](images/phase-flow.svg)
-
-Each hand-off is a **durable artifact**, not a live channel — which is why any phase can
-be re-run, resumed after a `/clear` or `/compact`, or picked up by a fresh session. The
-`SessionStart` hook re-injects the orchestrator persona and the two laws every time.
+Every arrow is a file on disk or a ticket on the board. A command can be re-run after a
+`/clear` or `/compact` because nothing lives only in a conversation.

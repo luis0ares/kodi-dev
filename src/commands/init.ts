@@ -250,10 +250,34 @@ function copyMarkdownFlat(srcRoot: string, destDir: string, reportBase: string):
 export const RETIRED_ASSETS = [
   '.claude/agents/backend-tester.md', // merged into backend-engineer
   '.claude/agents/frontend-tester.md', // merged into frontend-engineer
-  '.claude/agents/refactor-engineer.md', // became the /refactor skill
-  '.claude/agents/security.md', // became the /security skill
+  '.claude/agents/refactor-engineer.md', // became the /kodi.refactor skill
+  '.claude/agents/security.md', // became the /kodi.security skill
   '.claude/agents/qa-implementation.md', // renamed to backend-qa, now owned by backend-engineer
   '.claude/agents/qa-visual.md', // renamed to frontend-qa, now owned by frontend-engineer
+  // 1.5.0: the hub-and-spoke planning roster and the briefing agents gave way to
+  // discover-investigator, discover-writer, plan-writer and tasks-writer.
+  '.claude/agents/architect.md',
+  '.claude/agents/brand.md',
+  '.claude/agents/brief.md',
+  '.claude/agents/brownfield-wu.md',
+  '.claude/agents/component-engineer.md',
+  '.claude/agents/data-engineer.md',
+  '.claude/agents/detail.md',
+  '.claude/agents/greenfield-wu.md',
+  '.claude/agents/phases.md',
+  '.claude/agents/qa-planning.md',
+  '.claude/agents/researcher.md',
+  '.claude/agents/system-architect.md',
+  '.claude/agents/ux-lead.md',
+  // 1.5.0: the phase skills became the kodi.* commands.
+  '.claude/skills/discover',
+  '.claude/skills/oplan',
+  '.claude/skills/oreplan',
+  '.claude/skills/tickets',
+  '.claude/skills/retickets',
+  '.claude/skills/ticket-start',
+  '.claude/skills/security',
+  '.claude/skills/refactor',
 ];
 
 /** Delete every retired asset still installed under `root`; returns the report lines. */
@@ -262,7 +286,7 @@ function pruneRetiredAssets(root: string): string[] {
   for (const rel of RETIRED_ASSETS) {
     const path = join(root, rel);
     if (!existsSync(path)) continue;
-    rmSync(path, { force: true });
+    rmSync(path, { recursive: true, force: true });
     removed.push(`${rel} (removed)`);
   }
   return removed;

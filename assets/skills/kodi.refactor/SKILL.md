@@ -1,18 +1,18 @@
 ---
-name: refactor
+name: kodi.refactor
 description: >-
   Refactor a SPECIFIC target the HUMAN names — a function, class, file, module or
   directory — behavior-preservingly, in small steps, under a green test suite, with a
-  commit at each green state. Use whenever the user runs /refactor, or says things like
+  commit at each green state. Use whenever the user runs /kodi.refactor, or says things like
   "refactor this function", "clean up <file>", "extract this duplication", "split this
   300-line function", "this module's responsibilities are misplaced". The target is
   always the human's call — if none is named, ask; never pick the scope yourself and
   never widen it. NOT for adding features, fixing bugs, or changing behavior.
 ---
 
-# /refactor <target> — Behavior-preserving cleanup of a named target
+# /kodi.refactor <target> — Behavior-preserving cleanup of a named target
 
-A **human-invoked cleanup**, not a build step. Nothing in `/ticket-start` runs it; you
+A **human-invoked cleanup**, not a build step. Nothing in `/kodi.build` runs it; you
 run it when you want a specific piece of code improved.
 
 ## Laws
@@ -38,7 +38,8 @@ run it when you want a specific piece of code improved.
 1. **Resolve the target.** Take it verbatim from the invocation. If none was given, ask
    what to refactor — do not propose a codebase-wide hunt. If the target is vague
    ("the API layer"), narrow it with the human to concrete files before touching
-   anything.
+   anything. Name the candidate files in the ask, say what each one would cost to
+   clean up, and recommend one — never just "what should I refactor?".
 
 2. **Establish the safety net.** Run the **narrowest** test command that covers the
    target (from `CLAUDE.md`, quiet, no coverage).

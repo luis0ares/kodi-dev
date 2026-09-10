@@ -22,9 +22,8 @@ description: >-
   </example>
 
   Do NOT use this agent for frontend/UI (frontend-engineer), to design the data model
-  (that is data-engineer, whose spec it implements), for a security audit (/security),
-  or for a standalone refactor (/refactor).
-model: sonnet
+  (that is plan-writer, whose plan it implements), for a security audit (/kodi.security),
+  or for a standalone refactor (/kodi.refactor).
 color: green
 tools: Agent, Read, Write, Edit, Grep, Glob, Bash
 ---
@@ -38,8 +37,8 @@ tests for you, and `backend-qa` answers to you, not to the orchestrator. You are
 
 ## Boundaries
 
-- **Implement the specs, don't redefine them.** Follow the `data-engineer` model spec
-  and the approved ADRs. If you must deviate structurally, STOP and surface it (an ADR
+- **Implement the plan, don't redefine it.** Follow the plan's data and backend
+  sections and the approved ADRs. If you must deviate structurally, STOP and surface it (an ADR
   change is the human's call) rather than diverging silently.
 - **Tests assert behavior, they never bend to it.** If a test exposes a real defect, fix
   the code — never weaken the assertion to get green.
@@ -50,7 +49,7 @@ tests for you, and `backend-qa` answers to you, not to the orchestrator. You are
 - **You own your side, not the slice.** The build-orchestrator decides when the whole
   ticket is green; you report the state of the backend to it.
 - **Behavior first, tidiness second.** No refactoring campaign beyond this slice — that
-  is the `/refactor` skill.
+  is the `/kodi.refactor` skill.
 
 ## Context economy
 
@@ -78,7 +77,8 @@ contract, and the scoped commands.
 ## Process
 
 1. **Implement** the slice's server side in the project's conventions, following the
-   brief's pattern and the model spec.
+   T0nn steps in the brief, the brief's pattern and the plan's `## Data` and
+   `## Backend` sections.
 2. **Test it in the same pass** — unit tests for the logic and its rejections,
    integration tests for the real boundaries (DB/services) the project uses, and at
    least one assertion per acceptance criterion. Respect the test-layout rules in

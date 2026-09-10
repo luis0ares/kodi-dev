@@ -295,10 +295,10 @@ describe('installHarness (files only)', () => {
     expect(settings.env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH).toBe('5');
     // the SessionStart hook is wired
     expect(settings.hooks.SessionStart[0].hooks[0].command).toBe('kodi hook session-start');
-    for (const a of ['brief', 'architect', 'build-orchestrator']) {
+    for (const a of ['discover-writer', 'plan-writer', 'tasks-writer', 'ui-designer', 'build-orchestrator']) {
       expect(existsSync(join(dir, '.claude/agents', `${a}.md`))).toBe(true);
     }
-    for (const sk of ['discover', 'oplan', 'tickets', 'ticket-start', 'kodi-cli']) {
+    for (const sk of ['kodi.discover', 'kodi.plan', 'kodi.clarify', 'kodi.tasks', 'kodi.build', 'kodi-cli']) {
       expect(existsSync(join(dir, '.claude/skills', sk, 'SKILL.md'))).toBe(true);
     }
     expect(existsSync(join(dir, '.claude/rules/ticket-completion.md'))).toBe(true);
@@ -311,8 +311,8 @@ describe('installHarness (files only)', () => {
 
   it('reinstalls edited agents, skills and rules on a re-run, reporting them as updated', () => {
     installHarness(dir, { assetsDir: REPO_ASSETS });
-    const agent = join(dir, '.claude/agents/architect.md');
-    const skill = join(dir, '.claude/skills/tickets/SKILL.md');
+    const agent = join(dir, '.claude/agents/plan-writer.md');
+    const skill = join(dir, '.claude/skills/kodi.tasks/SKILL.md');
     const rule = join(dir, '.claude/rules/ticket-completion.md');
     const pristine = [agent, skill, rule].map((f) => readFileSync(f, 'utf-8'));
     for (const f of [agent, skill, rule]) writeFileSync(f, 'stale local edit\n', 'utf-8');
@@ -323,8 +323,8 @@ describe('installHarness (files only)', () => {
     expect([agent, skill, rule].map((f) => readFileSync(f, 'utf-8'))).toEqual(pristine);
     expect(changed).toEqual(
       expect.arrayContaining([
-        '.claude/agents/architect.md (updated)',
-        join('.claude/skills/tickets', 'SKILL.md') + ' (updated)',
+        '.claude/agents/plan-writer.md (updated)',
+        join('.claude/skills/kodi.tasks', 'SKILL.md') + ' (updated)',
         join('.claude/rules', 'ticket-completion.md') + ' (updated)',
       ]),
     );

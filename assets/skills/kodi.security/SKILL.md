@@ -1,23 +1,24 @@
 ---
-name: security
+name: kodi.security
 description: >-
   Hunt for security vulnerabilities in a scope the HUMAN names — the current diff, a
   file or directory, a feature/endpoint, or the whole project — then rank the findings
   and write one report per confirmed breach under docs/security/. Use whenever the user
-  runs /security, or says things like "check this for vulnerabilities", "security-review
+  runs /kodi.security, or says things like "check this for vulnerabilities", "security-review
   this endpoint", "is this auth safe", "audit tenancy/PII handling", "any injection risk
   here", "scan the dependencies for CVEs", "look for leaked secrets". It reviews,
   confirms and reports; it does not implement the fixes unless the human asks for them.
 ---
 
-# /security [scope] — Hunt for vulnerabilities in a named scope
+# /kodi.security [scope] — Hunt for vulnerabilities in a named scope
 
-A **human-invoked audit**, not a build step. Nothing in `/ticket-start` runs it; you run
+A **human-invoked audit**, not a build step. Nothing in `/kodi.build` runs it; you run
 it when you want a surface checked.
 
 - **The scope is the human's call.** If the invocation names one (a path, a feature, an
   endpoint, "the diff", "everything"), use exactly that. If it names none, ask —
-  offering the sensible defaults below — and do not go hunting on your own.
+  offering the sensible defaults below — and do not go hunting on your own. Say what
+  each scope covers and roughly what it costs, not just its name.
 - **Report only what you confirmed.** A finding you cannot trace to real, reachable code
   is not a finding. No speculation, no "consider maybe".
 - **Never downgrade a real finding** to make a scope look clean, and never widen a scope

@@ -22,9 +22,8 @@ description: >-
   </example>
 
   Do NOT use this agent to implement features, write the tests, review the UI
-  (frontend-qa), audit security (/security skill), or to declare the whole slice done —
+  (frontend-qa), audit security (/kodi.security skill), or to declare the whole slice done —
   that is the build-orchestrator's call.
-model: opus
 color: yellow
 tools: Read, Grep, Glob, Bash
 ---

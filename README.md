@@ -40,9 +40,9 @@ make install               # build + install the kodi binary globally from sourc
 - wires a **`SessionStart` hook** (matchers `startup | resume | clear | compact`) to
   `kodi hook session-start`, which injects the orchestrator persona + the two laws
   (ask-never-assume, ADR-is-law) into every session;
-- installs the **phase skills** (`/discover`, `/oplan`, `/tickets`, `/ticket-start`, …)
-  plus the on-demand ones (`/security`, `/refactor`), the **sub-agents**, and a `docs/`
-  scaffold;
+- installs the **commands** (`/kodi.discover`, `/kodi.plan`, `/kodi.clarify`,
+  `/kodi.tasks`, `/kodi.build`) plus the on-demand ones (`/kodi.security`,
+  `/kodi.refactor`), the **sub-agents**, and a `docs/` scaffold;
 - configures your **board provider**, and writes `.claude/kodi-dev.yaml` — every field
   it can write, and every field it can't, is listed in full in [Configuration
   reference](#configuration-reference-kodi-devyaml) below.
@@ -55,12 +55,13 @@ skills of your current kodi version, and local edits to them are replaced), and 
 `env` defaults — is re-asserted, restoring anything that was deleted or edited away.
 
 Everything kodi does **not** ship is left alone: your own agents and skills, your own
-hooks, permission rules and env vars all survive a re-run untouched. Agents a previous
-kodi shipped and the current one **retired** (`backend-tester`, `frontend-tester`,
-`refactor-engineer`, `security` — merged into the engineers or turned into the
-`/security` and `/refactor` skills — plus `qa-implementation` and `qa-visual`, renamed
-to `backend-qa` and `frontend-qa`) ARE deleted on re-run, so an upgraded project ends up
-with exactly the current roster.
+hooks, permission rules and env vars all survive a re-run untouched. Agents and skills a
+previous kodi shipped and the current one **retired** ARE deleted on re-run, so an
+upgraded project ends up with exactly the current roster. In 1.5.0 that is the whole
+hub-and-spoke planning roster (`architect`, `ux-lead`, `detail`, `phases`, `qa-planning`
+and their leaves), the briefing agents (`brief`, `brownfield-wu`, `greenfield-wu`) and
+the skills `discover`, `oplan`, `oreplan`, `tickets`, `retickets`, `ticket-start`,
+`security`, `refactor`.
 
 ### Choose a board provider
 
@@ -183,20 +184,31 @@ sourceBranch: develop # optional — every new slice branches from develop
 
 ## How it works
 
-kodi runs three explicit phases — **no auto-advancing pipeline** — each triggered by a
-skill and coordinated by an orchestrator. Every hand-off is a durable artifact, so a phase
-can be re-run or resumed after a `/clear` or `/compact`.
+kodi runs five explicit commands — **no auto-advancing pipeline** — each run by the
+human, grilled on the main thread, and written by one sub-agent. Every hand-off is a
+durable artifact, so a command can be re-run or resumed after a `/clear` or `/compact`.
+The owner's words are copied verbatim into every artifact; nothing is paraphrased on the
+way from the prompt to the ticket.
 
-| Phase     | Skill(s)                 | Orchestrator                     | Output                           |
-| --------- | ------------------------ | -------------------------------- | -------------------------------- |
-| Briefing  | `/discover`              | main-loop                        | `briefing.md` + thin `CLAUDE.md` |
-| Planning  | `/oplan`, `/oreplan`     | main-loop (hub-and-spoke)        | phased plan in `docs/plan`       |
-| Ticketing | `/tickets`, `/retickets` | main-loop → CLI                  | tickets on the board             |
-| Build     | `/ticket-start`          | `build-orchestrator` (sub-agent) | vertical slice → gate → PR       |
-| On demand | `/security`, `/refactor` | main-loop                        | audit reports / a tidied target  |
+| Command                     | Writer                   | Output                                                                  |
+| --------------------------- | ------------------------ | ----------------------------------------------------------------------- |
+| `/kodi.discover`            | `discover-writer`        | thin `CLAUDE.md`, rules, PRD 0000, founding ADRs; brownfield: as-built PRDs and ADRs |
+| `/kodi.plan <user story>`   | `plan-writer`            | `docs/prd/NNNN` (WHAT/WHY) + `docs/plan/NNNN` (caveman technical plan) |
+| `/kodi.clarify <prd>`       | `plan-writer`            | answers written back, ambiguous sentences replaced                      |
+| `/kodi.tasks <prd>`         | `tasks-writer`           | `docs/plan/NNNN.tasks.md` + one ticket per user story on the board      |
+| `/kodi.build <ticket>`      | `build-orchestrator`     | `ui-designer` → engineers with their own QA → PR to To Review           |
+| `/kodi.security`, `/kodi.refactor` | main-loop         | audit reports / a tidied target                                         |
+
+`/kodi.plan` is spec-kit's `specify` + `plan` in one pass: the story verbatim, at most
+five questions with a recommended answer each, then a short PRD with inline
+`[NEEDS CLARIFICATION]` markers and a plan that names files, contracts and data.
+`/kodi.tasks` is spec-kit's `tasks` + tasks-to-issues: one vertical-slice ticket per
+user story, its `T0nn` steps with exact paths, a requirement-to-ticket matrix the human
+approves, then `kodi tickets create` in the current iteration.
 
 Engineers know their **role**, not your stack — the stack lives in the thin `CLAUDE.md`
-and in installable **skill-packs** (`kodi add`).
+and in installable **skill-packs** (`kodi add`). No agent pins a model: every sub-agent
+inherits the session's model.
 
 > [!TIP]
 > For the full agent roster, per-phase diagrams, and how the agents communicate, see
@@ -310,10 +322,11 @@ kodi add ./packs/fastapi-backend    # install a skill-pack (skills + CLAUDE.md f
 ```bash
 kodi init                    # once per project — wires the harness + board
 # in a Claude Code session:
-/discover                    # → briefing.md + thin CLAUDE.md
-/oplan                       # → phased plan in docs/plan
-/tickets                     # → tickets on the board
-/ticket-start KODI-001       # → build one slice, gate, PR to To Review
-/security diff               # → audit a scope you name → docs/security/ reports
-/refactor src/api/users.ts   # → behavior-preserving cleanup of a target you name
+/kodi.discover                       # → thin CLAUDE.md, rules, PRD 0000, founding ADRs
+/kodi.plan I want a rate limiter…    # → docs/prd/0001 + docs/plan/0001, approved by you
+/kodi.clarify 0001                   # → up to five questions, answers written back
+/kodi.tasks 0001                     # → docs/plan/0001.tasks.md + tickets on the board
+/kodi.build KODI-001                 # → build one slice, scoped regression, PR to To Review
+/kodi.security diff                  # → audit a scope you name → docs/security/ reports
+/kodi.refactor src/api/users.ts      # → behavior-preserving cleanup of a target you name
 ```
