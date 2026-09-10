@@ -134,3 +134,40 @@ export async function checkForUpdate(
     );
   }
 }
+
+export interface ForceUpdateResult {
+  /** Latest published version, or `null` when the registry could not be reached. */
+  latest: string | null;
+  /** Whether `npm install -g <pkg>@latest` ran and succeeded. */
+  updated: boolean;
+  /** True when the current version already matched `latest` and no reinstall was asked for. */
+  alreadyLatest: boolean;
+}
+
+/**
+ * The forced counterpart of `checkForUpdate`, behind `kodi update`: no daily
+ * cache to wait out and no `KODI_NO_AUTO_UPDATE`/CI opt-out — asking for the
+ * update *is* the opt-in. Hits the registry every time, installs whenever a
+ * newer version is published (or, with `reinstall`, even when there isn't one),
+ * and still refreshes the shared cache so the ambient check doesn't redo the
+ * work today. Returns the outcome instead of printing it; the command reports.
+ */
+export async function forceUpdate(
+  pkgName: string,
+  currentVersion: string,
+  deps: UpdateCheckDeps & { reinstall?: boolean } = {},
+): Promise<ForceUpdateResult> {
+  const cachePath = deps.cachePath ?? defaultCachePath();
+  const now = deps.now ?? Date.now;
+  const fetchLatest = deps.fetchLatest ?? fetchLatestFromNpm;
+  const run = deps.run ?? defaultRun;
+
+  const latest = await fetchLatest(pkgName);
+  if (!latest) return { latest: null, updated: false, alreadyLatest: false };
+  writeCache(cachePath, { checkedAt: now(), latest });
+
+  if (!isNewerVersion(latest, currentVersion) && !deps.reinstall) {
+    return { latest, updated: false, alreadyLatest: true };
+  }
+  return { latest, updated: autoInstall(pkgName, run), alreadyLatest: false };
+}

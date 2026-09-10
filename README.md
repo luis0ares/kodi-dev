@@ -226,6 +226,17 @@ path — whether a newer kodi is published on npm, and installs it directly
 (`npm install -g kodi-dev@latest`) rather than just telling you to. Set
 `KODI_NO_AUTO_UPDATE=1` to opt out (CI is skipped automatically).
 
+### Update
+
+```bash
+kodi update            # force the self-update now, without waiting for the daily check
+kodi update --force    # …and reinstall even when already on the latest version
+```
+
+Asking for the update is the opt-in, so `kodi update` ignores both the once-a-day cache
+and `KODI_NO_AUTO_UPDATE`/CI. It exits non-zero when an update was wanted but could not be
+installed (registry unreachable, no npm, permissions, …).
+
 ### Tickets
 
 ```bash

@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { checkForUpdate, isNewerVersion } from '../src/update-check.js';
+import { checkForUpdate, forceUpdate, isNewerVersion } from '../src/update-check.js';
 
 describe('isNewerVersion', () => {
   it('compares major/minor/patch numerically', () => {
@@ -102,5 +102,92 @@ describe('checkForUpdate', () => {
     await checkForUpdate('kodi-dev', '1.5.0', { cachePath, now: () => 42, fetchLatest });
     expect(existsSync(cachePath)).toBe(true);
     expect(JSON.parse(readFileSync(cachePath, 'utf-8'))).toEqual({ checkedAt: 42, latest: '1.5.0' });
+  });
+});
+
+describe('forceUpdate', () => {
+  it('installs a newer version and reports it', async () => {
+    const fetchLatest = vi.fn().mockResolvedValue('2.0.0');
+    const run = vi.fn().mockReturnValue({ status: 0 });
+    const res = await forceUpdate('kodi-dev', '1.0.0', {
+      cachePath,
+      now: () => 0,
+      fetchLatest,
+      run,
+    });
+    expect(run).toHaveBeenCalledWith(['npm', 'install', '-g', 'kodi-dev@latest']);
+    expect(res).toEqual({ latest: '2.0.0', updated: true, alreadyLatest: false });
+  });
+
+  it('ignores a same-day cache — the whole point of asking for it explicitly', async () => {
+    const fetchLatest = vi.fn().mockResolvedValue('1.0.0');
+    await checkForUpdate('kodi-dev', '1.0.0', { cachePath, now: () => 0, fetchLatest });
+    await forceUpdate('kodi-dev', '1.0.0', { cachePath, now: () => 1, fetchLatest });
+    expect(fetchLatest).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not reinstall when already on the latest version', async () => {
+    const fetchLatest = vi.fn().mockResolvedValue('1.0.0');
+    const run = vi.fn();
+    const res = await forceUpdate('kodi-dev', '1.0.0', {
+      cachePath,
+      now: () => 0,
+      fetchLatest,
+      run,
+    });
+    expect(run).not.toHaveBeenCalled();
+    expect(res).toEqual({ latest: '1.0.0', updated: false, alreadyLatest: true });
+  });
+
+  it('reinstalls the same version when asked to', async () => {
+    const fetchLatest = vi.fn().mockResolvedValue('1.0.0');
+    const run = vi.fn().mockReturnValue({ status: 0 });
+    const res = await forceUpdate('kodi-dev', '1.0.0', {
+      cachePath,
+      now: () => 0,
+      fetchLatest,
+      run,
+      reinstall: true,
+    });
+    expect(run).toHaveBeenCalledWith(['npm', 'install', '-g', 'kodi-dev@latest']);
+    expect(res).toEqual({ latest: '1.0.0', updated: true, alreadyLatest: false });
+  });
+
+  it('reports a failed install rather than throwing', async () => {
+    const fetchLatest = vi.fn().mockResolvedValue('2.0.0');
+    const run = vi.fn().mockReturnValue({ status: 1 });
+    const res = await forceUpdate('kodi-dev', '1.0.0', {
+      cachePath,
+      now: () => 0,
+      fetchLatest,
+      run,
+    });
+    expect(res).toEqual({ latest: '2.0.0', updated: false, alreadyLatest: false });
+  });
+
+  it('reports an unreachable registry and leaves the cache untouched', async () => {
+    const fetchLatest = vi.fn().mockResolvedValue(null);
+    const run = vi.fn();
+    const res = await forceUpdate('kodi-dev', '1.0.0', {
+      cachePath,
+      now: () => 0,
+      fetchLatest,
+      run,
+    });
+    expect(res).toEqual({ latest: null, updated: false, alreadyLatest: false });
+    expect(run).not.toHaveBeenCalled();
+    expect(existsSync(cachePath)).toBe(false);
+  });
+
+  it('refreshes the shared cache so the ambient check does not redo the work today', async () => {
+    const fetchLatest = vi.fn().mockResolvedValue('2.0.0');
+    const run = vi.fn().mockReturnValue({ status: 0 });
+    await forceUpdate('kodi-dev', '1.0.0', { cachePath, now: () => 42, fetchLatest, run });
+    expect(JSON.parse(readFileSync(cachePath, 'utf-8'))).toEqual({
+      checkedAt: 42,
+      latest: '2.0.0',
+    });
+    await checkForUpdate('kodi-dev', '1.0.0', { cachePath, now: () => 43, fetchLatest, run });
+    expect(fetchLatest).toHaveBeenCalledTimes(1);
   });
 });

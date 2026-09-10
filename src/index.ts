@@ -5,6 +5,7 @@ import { registerInitCommand } from './commands/init.js';
 import { registerPrCommand } from './commands/pr.js';
 import { registerServeCommand } from './commands/serve.js';
 import { registerTicketsCommand } from './commands/tickets.js';
+import { registerUpdateCommand } from './commands/update.js';
 import { checkForUpdate } from './update-check.js';
 
 import { version, name, description } from '../package.json';
@@ -22,6 +23,7 @@ registerPrCommand(program);
 registerHookCommand(program);
 registerInitCommand(program);
 registerAddCommand(program);
+registerUpdateCommand(program, name, version);
 
 program
   .parseAsync(process.argv)
