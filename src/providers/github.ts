@@ -270,6 +270,12 @@ export class GithubTicketProvider implements TicketProvider {
       dryRun: boolean;
       cwd?: string;
       columns?: ColumnMap;
+      /**
+       * Add a created issue to the Projects v2 board (default). `false` — from
+       * `tickets create --no-project` — creates the issue only, for filing into a
+       * repository that this project's board does not track.
+       */
+      attachToProject?: boolean;
     },
   ) {
     this.columns = opts.columns ?? DEFAULT_COLUMNS;
@@ -399,18 +405,24 @@ export class GithubTicketProvider implements TicketProvider {
     const slug = input.slug ?? slugify(input.title);
     const draft: StoredTicket = { ...input, key: '(pending)', slug };
     const bodyFile = writeTempBody(serializeBody(draft));
+    const attach = this.opts.attachToProject !== false;
     const r1 = execMutate(createIssueArgs(this.opts.repo, input.title, bodyFile), this.opts.dryRun);
     if (!r1.ran) {
       // Preview the rest of the chain with placeholders (real URL/item-id unknown in dry-run).
-      execMutate(itemAddArgs(this.opts.owner, this.opts.number, '<issue-url>'), this.opts.dryRun);
-      execMutate(
-        itemEditArgs('<project-id>', '<item-id>', '<status-field-id>', '<option-id>'),
-        this.opts.dryRun,
-      );
+      if (attach) {
+        execMutate(itemAddArgs(this.opts.owner, this.opts.number, '<issue-url>'), this.opts.dryRun);
+        execMutate(
+          itemEditArgs('<project-id>', '<item-id>', '<status-field-id>', '<option-id>'),
+          this.opts.dryRun,
+        );
+      }
       return { ...draft, key: '(dry-run)' };
     }
     const url = r1.stdout.trim().split('\n').pop() ?? '';
     const num = url.match(/\/(\d+)\/?$/)?.[1] ?? '?';
+    // --no-project: the issue is the whole deliverable, so there is no board step
+    // to attempt and no orphan to report.
+    if (!attach) return { ...draft, key: num };
     // The issue now EXISTS. If attaching it to the board fails (commonly a token
     // without the `project` write scope), don't leave a silent orphan — report
     // that the issue was created and exactly how to finish adding it.

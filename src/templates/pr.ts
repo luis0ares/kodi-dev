@@ -37,12 +37,16 @@ const TestingSchema = z
   .object({
     unit: z.boolean().default(false),
     integration: z.boolean().default(false),
+    /** A real-stack end-to-end suite (Playwright/Cypress/…). Distinct from
+     * `integration`, which is where such a run used to be recorded for want of a
+     * better box — an E2E suite is neither a component-integration test nor manual. */
+    e2e: z.boolean().default(false),
     manual: z.boolean().default(false),
     na: z.boolean().default(false),
   })
   .default({})
   .refine(anyChecked, {
-    message: 'Testing: select at least one (unit/integration/manual/na)',
+    message: 'Testing: select at least one (unit/integration/e2e/manual/na)',
   });
 
 export const PrSchema = z.object({
@@ -138,6 +142,7 @@ export function renderPrMarkdown(pr: Pr): string {
     ...checkboxes([
       ['Unit tests', pr.testing.unit],
       ['Integration tests', pr.testing.integration],
+      ['End-to-end tests', pr.testing.e2e],
       ['Manual testing', pr.testing.manual],
       ['N/A', pr.testing.na],
     ]),

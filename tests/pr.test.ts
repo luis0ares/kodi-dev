@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertSourcePublished,
   azureCreateArgs,
+  azureListArgs,
   azureUpdateArgs,
   azureWorkItemIds,
   githubCreateArgs,
   githubEditArgs,
+  githubListArgs,
+  hasClosingKeyword,
+  normalizeRelatedIssue,
+  normalizeRelatedIssues,
+  parseAzurePrList,
+  parseGithubPrList,
+  renderPrList,
 } from '../src/commands/pr.js';
 import {
   assertWithinBodyLimit,
@@ -310,5 +319,203 @@ describe('pr command construction', () => {
     const az = azureCreateArgs(draft(), '<p>x</p>', 'feat/x', 'main', undefined, true);
     expect(az).toContain('--draft');
     expect(az[az.indexOf('--draft') + 1]).toBe('true');
+  });
+});
+
+describe('--testing e2e', () => {
+  it('accepts e2e as its own box rather than filing an E2E suite under integration', () => {
+    const md = renderPrMarkdown(draft({ testing: { e2e: true } }));
+    expect(md).toContain('- [x] End-to-end tests');
+    expect(md).toContain('- [ ] Integration tests');
+  });
+
+  it('still requires at least one testing box', () => {
+    const r = PrSchema.safeParse({
+      title: 'A valid title',
+      summary: 'x',
+      typeOfChange: { fix: true },
+      relatedIssues: ['N/A'],
+      testing: {},
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) expect(r.error.issues.some((i) => /e2e/.test(i.message))).toBe(true);
+  });
+});
+
+describe('normalizeRelatedIssue', () => {
+  it('completes a bare ref into a closing keyword GitHub acts on', () => {
+    expect(normalizeRelatedIssue('3')).toBe('Closes #3');
+    expect(normalizeRelatedIssue('#3')).toBe('Closes #3');
+    expect(normalizeRelatedIssue(' 3 ')).toBe('Closes #3');
+  });
+
+  it('accepts a kodi-shaped key — on GitHub the number IS the issue', () => {
+    expect(normalizeRelatedIssue('KODI-3')).toBe('Closes #3');
+    expect(normalizeRelatedIssue('KODI-003')).toBe('Closes #3');
+  });
+
+  it('honours the chosen keyword, and passes everything through on "none"', () => {
+    expect(normalizeRelatedIssue('3', 'fixes')).toBe('Fixes #3');
+    expect(normalizeRelatedIssue('3', 'resolves')).toBe('Resolves #3');
+    expect(normalizeRelatedIssue('3', 'none')).toBe('3');
+  });
+
+  it('never rewrites an entry that already carries its own keyword', () => {
+    for (const entry of ['Closes #3', 'fixes #3', 'Resolved #3', 'Fix #12']) {
+      expect(normalizeRelatedIssue(entry)).toBe(entry);
+    }
+  });
+
+  it('leaves the N/A placeholder, URLs and free text alone', () => {
+    expect(normalizeRelatedIssue('N/A')).toBe('N/A');
+    expect(normalizeRelatedIssue('n/a')).toBe('n/a');
+    expect(normalizeRelatedIssue('https://github.com/o/r/issues/3')).toBe(
+      'https://github.com/o/r/issues/3',
+    );
+    expect(normalizeRelatedIssue('see the tracking epic')).toBe('see the tracking epic');
+  });
+});
+
+describe('normalizeRelatedIssues', () => {
+  it('applies on github', () => {
+    expect(normalizeRelatedIssues(['3', '#4', 'N/A'], 'github')).toEqual([
+      'Closes #3',
+      'Closes #4',
+      'N/A',
+    ]);
+  });
+
+  it('leaves azure untouched — its links come from --work-items, which parses raw refs', () => {
+    expect(normalizeRelatedIssues(['123', 'AB#456'], 'azure')).toEqual(['123', 'AB#456']);
+    // …and the raw refs still resolve to work-item ids after passing through.
+    expect(azureWorkItemIds(normalizeRelatedIssues(['123', 'AB#456'], 'azure'))).toEqual([
+      '123',
+      '456',
+    ]);
+  });
+
+  it('renders the completed reference without neutralizing its "#"', () => {
+    const pr = draft({ relatedIssues: normalizeRelatedIssues(['3'], 'github') });
+    const md = renderPrMarkdown(pr);
+    expect(md).toContain('- Closes #3');
+    expect(md).not.toContain('#​3'); // the ZWSP guard must not reach this section
+  });
+});
+
+describe('hasClosingKeyword', () => {
+  it('detects the entries that depend on GitHub linking them', () => {
+    expect(hasClosingKeyword(['Closes #3'])).toBe(true);
+    expect(hasClosingKeyword(['N/A', 'Fixes #9'])).toBe(true);
+    expect(hasClosingKeyword(['N/A'])).toBe(false);
+    expect(hasClosingKeyword(['#3'])).toBe(false);
+  });
+});
+
+describe('assertSourcePublished', () => {
+  it('passes when the branch is on the remote', () => {
+    expect(() =>
+      assertSourcePublished('slice/kodi-2', '/repo', () => 'sha\trefs/heads/slice/kodi-2\n'),
+    ).not.toThrow();
+  });
+
+  it('names the push command instead of letting gh report an unknown ref', () => {
+    const empty = () => '';
+    expect(() => assertSourcePublished('slice/kodi-2', '/repo', empty)).toThrow(
+      /does not exist on origin/,
+    );
+    expect(() => assertSourcePublished('slice/kodi-2', '/repo', empty)).toThrow(
+      /git push -u origin slice\/kodi-2/,
+    );
+  });
+
+  it('never blocks when the remote cannot be interrogated', () => {
+    expect(() =>
+      assertSourcePublished('slice/kodi-2', '/repo', () => {
+        throw new Error('offline');
+      }),
+    ).not.toThrow();
+  });
+});
+
+describe('pr list', () => {
+  it('asks github for the base branch, which the old listing omitted entirely', () => {
+    const args = githubListArgs('Owner/repo');
+    expect(args[args.indexOf('--json') + 1]).toContain('baseRefName');
+    expect(args).toContain('--repo');
+    expect(githubListArgs()).not.toContain('--repo');
+  });
+
+  it('asks azure for json, with the repository only when one is configured', () => {
+    expect(azureListArgs('Repo')).toEqual([
+      'az',
+      'repos',
+      'pr',
+      'list',
+      '--output',
+      'json',
+      '--repository',
+      'Repo',
+    ]);
+    expect(azureListArgs()).not.toContain('--repository');
+  });
+
+  it('normalizes a github listing', () => {
+    const rows = parseGithubPrList(
+      JSON.stringify([
+        {
+          number: 8,
+          title: 'feat: slice 3',
+          headRefName: 'slice/kodi-3',
+          baseRefName: 'integration/0006-visual-identity',
+          state: 'OPEN',
+          updatedAt: '2026-09-16T09:04:39Z',
+        },
+      ]),
+    );
+    expect(rows).toEqual([
+      {
+        id: '8',
+        title: 'feat: slice 3',
+        source: 'slice/kodi-3',
+        target: 'integration/0006-visual-identity',
+        state: 'OPEN',
+        updated: '2026-09-16T09:04:39Z',
+      },
+    ]);
+  });
+
+  it('normalizes an azure listing, shortening its fully-qualified refs', () => {
+    const rows = parseAzurePrList(
+      JSON.stringify([
+        {
+          pullRequestId: 42,
+          title: 'fix: thing',
+          sourceRefName: 'refs/heads/slice/kodi-4',
+          targetRefName: 'refs/heads/develop',
+          status: 'active',
+          creationDate: '2026-09-16T09:04:39Z',
+        },
+      ]),
+    );
+    expect(rows[0].source).toBe('slice/kodi-4');
+    expect(rows[0].target).toBe('develop');
+    expect(rows[0].id).toBe('42');
+  });
+
+  it('renders the target branch on every row', () => {
+    const out = renderPrList([
+      { id: '8', title: 'feat: slice 3', source: 'slice/kodi-3', target: 'develop', state: 'OPEN' },
+      { id: '10', title: 'fix: y', source: 'slice/kodi-4', target: 'main', state: 'OPEN' },
+    ]);
+    expect(out).toContain('slice/kodi-3 → develop');
+    expect(out).toContain('slice/kodi-4 → main');
+    // aligned columns: both rows start their branch cell at the same offset
+    const [a, b] = out.split('\n');
+    expect(a.indexOf('slice/kodi-3')).toBe(b.indexOf('slice/kodi-4'));
+  });
+
+  it('says so rather than printing nothing on an empty board', () => {
+    expect(renderPrList([])).toBe('No open pull requests.');
+    expect(parseGithubPrList('')).toEqual([]);
   });
 });

@@ -1,7 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
-import { DEFAULT_WORKTREES_DIR, findProjectRoot, loadBoardConfig } from '../config.js';
-import { startSliceGit } from '../git.js';
+import {
+  DEFAULT_WORKTREES_DIR,
+  findProjectRoot,
+  loadBoardConfig,
+  type ProviderName,
+} from '../config.js';
+import { DEFAULT_REMOTE, startSliceGit } from '../git.js';
 import { LegacyDataError, type LegacyDataReport } from '../providers/local.js';
 import { resolveProvider } from '../providers/index.js';
 import type { TicketProvider, TicketRef } from '../providers/types.js';
@@ -12,6 +17,24 @@ import {
   type Ticket,
   type TicketStatus,
 } from '../templates/ticket.js';
+
+/**
+ * Make a PR reference readable in the ticket body it is written into.
+ *
+ * `link-pr` / `hand-off --pr` are kodi-internal BOOKKEEPING: they render a
+ * `**PR:** <ref>` line into the issue/work-item body. Nothing they do — and
+ * nothing GitHub exposes — populates the PR sidebar's Development panel, which
+ * has no documented public REST or GraphQL mutation and is UI-only. What they
+ * can do is store a value that is at least a cross-reference: `--pr 8` used to
+ * render the inert literal `8`, so on GitHub a bare number becomes `#8`.
+ * Azure work-item bodies are HTML with their own linkifier and their PR links
+ * come from `az repos pr create --work-items`, so refs there are left as typed.
+ */
+export function normalizePrRef(ref: string, provider: ProviderName): string {
+  const text = ref.trim();
+  if (provider !== 'github') return text;
+  return /^\d+$/.test(text) ? `#${text}` : text;
+}
 
 function out(data: unknown, json: boolean, human: () => string) {
   if (json) process.stdout.write(JSON.stringify(data) + '\n');
@@ -99,11 +122,23 @@ export function registerTicketsCommand(program: Command) {
     .option('--security <ref>', 'security driver')
     .option('--notes <text>')
     .option('--iteration <name>', 'assign to an iteration/sprint (azure/github only)')
+    .option(
+      '--repository <repo>',
+      'file the ticket in another repository (github only: OWNER/REPO)',
+    )
+    .option(
+      '--no-project',
+      'create the issue only — do not add it to the Projects v2 board (github only)',
+    )
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (o) => {
       const draft = draftFromOptions(o);
-      const provider = resolveProvider(process.cwd(), { yes: o.yes });
+      const provider = resolveProvider(process.cwd(), {
+        yes: o.yes,
+        repository: o.repository,
+        noProject: o.project === false,
+      });
       await warnUnknownDependencies(provider, draft.dependencies);
       try {
         let created: Awaited<ReturnType<typeof provider.create>> & { iteration?: string } =
@@ -215,7 +250,10 @@ export function registerTicketsCommand(program: Command) {
 
   tickets
     .command('get <key>')
-    .description('Show one ticket')
+    // `show` is the name people reach for first; aliasing it beats answering a
+    // guess with a bare `unknown command 'show'`.
+    .alias('show')
+    .description('Show one ticket (alias: show)')
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
       key = canonicalizeTicketKey(key);
@@ -263,6 +301,13 @@ export function registerTicketsCommand(program: Command) {
       'skip branch/worktree creation — use when bundling several tickets onto one ' +
         'already-cut branch (only the first `start` in the batch omits this)',
     )
+    .option(
+      '--push',
+      'also publish the branch with upstream tracking (`git push -u`) — a PR head ' +
+        'must exist on the remote before `kodi pr create` can open against it',
+      false,
+    )
+    .option('--remote <name>', 'remote --push targets', DEFAULT_REMOTE)
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
@@ -272,7 +317,12 @@ export function registerTicketsCommand(program: Command) {
         process.exitCode = 1;
         return;
       }
-      let git: { branch: string; worktreePath?: string } | undefined;
+      if (o.push && o.branch === false) {
+        process.stderr.write('--push and --no-branch are mutually exclusive\n');
+        process.exitCode = 1;
+        return;
+      }
+      let git: { branch: string; worktreePath?: string; pushed: boolean } | undefined;
       if (o.branch !== false) {
         const cfg = loadBoardConfig(process.cwd());
         git = startSliceGit(key, {
@@ -281,20 +331,37 @@ export function registerTicketsCommand(program: Command) {
           root: findProjectRoot(process.cwd()),
           dryRun: !o.yes,
           sourceBranch: cfg.sourceBranch,
+          push: o.push,
+          remote: o.remote,
         });
       }
       const t = await resolveProvider(process.cwd(), { yes: o.yes }).start(key, {
         branch: git?.branch,
       });
-      out({ ...t, branch: git?.branch, worktreePath: git?.worktreePath }, o.json, () =>
-        [
-          `${t.key} → ${t.status}`,
-          git
-            ? git.worktreePath
-              ? `worktree: ${git.worktreePath}`
-              : `branch: ${git.branch}`
-            : 'branch: skipped (--no-branch)',
-        ].join('\n'),
+      out(
+        {
+          ...t,
+          branch: git?.branch,
+          worktreePath: git?.worktreePath,
+          ...(git ? { pushed: git.pushed } : {}),
+        },
+        o.json,
+        () =>
+          [
+            `${t.key} → ${t.status}`,
+            git
+              ? git.worktreePath
+                ? `worktree: ${git.worktreePath}`
+                : `branch: ${git.branch}`
+              : 'branch: skipped (--no-branch)',
+            // A branch that exists only locally cannot be a PR head — say so at
+            // `start`, rather than letting `pr create` be the one to discover it.
+            git && !git.pushed
+              ? `(local only — push it before \`kodi pr create\`, or re-run with --push)`
+              : undefined,
+          ]
+            .filter(Boolean)
+            .join('\n'),
       );
     });
 
@@ -357,13 +424,17 @@ export function registerTicketsCommand(program: Command) {
 
   tickets
     .command('link-pr <key> <pr>')
-    .description('Bind a pull request to a ticket')
+    .description(
+      "Record a pull request on the ticket — writes a **PR:** line into the ticket's " +
+        "body. kodi bookkeeping only: it does not populate GitHub's Development panel",
+    )
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, pr, o) => {
       key = canonicalizeTicketKey(key);
-      const t = await resolveProvider(process.cwd(), { yes: o.yes }).amend(key, { prUrl: pr });
-      out(t, o.json, () => `${t.key} ↔ ${pr}`);
+      const ref = normalizePrRef(pr, loadBoardConfig(process.cwd()).provider);
+      const t = await resolveProvider(process.cwd(), { yes: o.yes }).amend(key, { prUrl: ref });
+      out(t, o.json, () => `${t.key} ↔ ${ref}`);
     });
 
   tickets
@@ -398,16 +469,20 @@ export function registerTicketsCommand(program: Command) {
 
   tickets
     .command('hand-off <key>')
-    .description('End of slice: move to To review and optionally link the PR')
-    .option('--pr <ref>', 'link the PR at hand-off')
+    .description(
+      'End of slice: move to To review and optionally record the PR. Idempotent — ' +
+        're-running on a ticket already in To review just (re-)writes the PR link',
+    )
+    .option('--pr <ref>', 'record the PR at hand-off (same bookkeeping as link-pr)')
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
       key = canonicalizeTicketKey(key);
       const provider = resolveProvider(process.cwd(), { yes: o.yes });
-      if (o.pr) await provider.amend(key, { prUrl: o.pr });
+      const ref = o.pr ? normalizePrRef(o.pr, loadBoardConfig(process.cwd()).provider) : undefined;
+      if (ref) await provider.amend(key, { prUrl: ref });
       const t = await provider.setStatus(key, 'To review');
-      out(t, o.json, () => `${t.key} → ${t.status}${o.pr ? ` (PR ${o.pr})` : ''}`);
+      out(t, o.json, () => `${t.key} → ${t.status}${ref ? ` (PR ${ref})` : ''}`);
     });
 
   return tickets;

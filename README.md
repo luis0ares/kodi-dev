@@ -145,6 +145,14 @@ editing the YAML.
 | `columns`       | Status → column map (`todo`/`inProgress`/`toReview`/`done`)                        | `github`, `azure` |
 | `prTarget`      | Default target branch for `kodi pr create`, chosen from the remote's real branches | `github`, `azure` |
 
+**Recommended repo shape for the GitHub provider.** If `prTarget` is an integration branch
+(`develop`, `integration/…`), make that branch the **repository's default branch** too.
+GitHub populates a PR's Development panel — and auto-closes the referenced issues on merge —
+only when the PR's base is the default branch, so a `prTarget` that differs from it means
+no kodi-created PR can ever link to its tickets. See
+[Linking a PR to its issues](#linking-a-pr-to-its-issues-github). This does not apply to
+Azure DevOps, where work-item links close on completion whatever the target branch is.
+
 ### Additional configuration (not set by `kodi init`)
 
 These exist for cases the wizard deliberately doesn't ask about — there's no sensible
@@ -190,14 +198,14 @@ durable artifact, so a command can be re-run or resumed after a `/clear` or `/co
 The owner's words are copied verbatim into every artifact; nothing is paraphrased on the
 way from the prompt to the ticket.
 
-| Command                     | Writer                   | Output                                                                  |
-| --------------------------- | ------------------------ | ----------------------------------------------------------------------- |
-| `/kodi.discover`            | `discover-writer`        | thin `CLAUDE.md`, rules, PRD 0000, founding ADRs; brownfield: as-built PRDs and ADRs |
-| `/kodi.plan <user story>`   | `plan-writer`            | `docs/prd/NNNN` (WHAT/WHY) + `docs/plan/NNNN` (caveman technical plan) |
-| `/kodi.clarify <prd>`       | `plan-writer`            | answers written back, ambiguous sentences replaced                      |
-| `/kodi.tasks <prd>`         | `tasks-writer`           | `docs/plan/NNNN.tasks.md` + one ticket per user story on the board      |
-| `/kodi.build <ticket>`      | `build-orchestrator`     | `ui-designer` → engineers with their own QA → PR to To Review           |
-| `/kodi.security`, `/kodi.refactor` | main-loop         | audit reports / a tidied target                                         |
+| Command                            | Writer               | Output                                                                               |
+| ---------------------------------- | -------------------- | ------------------------------------------------------------------------------------ |
+| `/kodi.discover`                   | `discover-writer`    | thin `CLAUDE.md`, rules, PRD 0000, founding ADRs; brownfield: as-built PRDs and ADRs |
+| `/kodi.plan <user story>`          | `plan-writer`        | `docs/prd/NNNN` (WHAT/WHY) + `docs/plan/NNNN` (caveman technical plan)               |
+| `/kodi.clarify <prd>`              | `plan-writer`        | answers written back, ambiguous sentences replaced                                   |
+| `/kodi.tasks <prd>`                | `tasks-writer`       | `docs/plan/NNNN.tasks.md` + one ticket per user story on the board                   |
+| `/kodi.build <ticket>`             | `build-orchestrator` | `ui-designer` → engineers with their own QA → PR to To Review                        |
+| `/kodi.security`, `/kodi.refactor` | main-loop            | audit reports / a tidied target                                                      |
 
 `/kodi.plan` is spec-kit's `specify` + `plan` in one pass: the story verbatim, at most
 five questions with a recommended answer each, then a short PRD with inline
@@ -241,17 +249,19 @@ installed (registry unreachable, no npm, permissions, …).
 
 ```bash
 kodi tickets create -t "Title" -s "Summary" --ac "criterion" --dep KODI-001
+kodi tickets create ... --repository Owner/other --no-project --yes  # file into another repo (github)
 kodi tickets list                    # open tickets (Done is not fetched)
 kodi tickets list --all              # …including the Done column
 kodi tickets list-ready              # dependency-aware readiness (+ the blocked set)
-kodi tickets get KODI-001            # any ticket, Done or not
+kodi tickets get KODI-001            # any ticket, Done or not (alias: `tickets show`)
 kodi tickets deps KODI-001 --add KODI-002   # read or declare dependencies
 kodi tickets set-status KODI-001 Done
 kodi tickets amend KODI-001 --file patch.yaml
 kodi tickets start KODI-001 --yes             # → In progress, assigns you, cuts slice/kodi-KODI-001
+kodi tickets start KODI-001 --push --yes      # …and publish it (`git push -u origin`) so a PR can open
 kodi tickets start KODI-001 --worktree --yes  # …or an isolated worktree instead
 kodi tickets start KODI-002 --no-branch --yes # bundling onto a branch another `start` already cut
-kodi tickets hand-off KODI-001 --pr <url>     # end of slice: → To Review, link the PR
+kodi tickets hand-off KODI-001 --pr <url>     # end of slice: → To Review, record the PR
 kodi tickets iterations                       # list every iteration/sprint (azure/github only)
 kodi tickets list --iteration "Sprint 12"     # one specific iteration instead of the current one
 kodi tickets list --all-iterations            # disable iteration filtering — every ticket, every sprint
@@ -267,6 +277,19 @@ branch as a separate worktree instead of switching the current checkout — unde
 `.claude/worktrees/` by default, overridable per-project via `worktreesDir`.
 `--no-branch` skips branch/worktree creation entirely, for bundling several tickets onto
 one branch (`--worktree` and `--no-branch` together are rejected).
+
+The branch `start` cuts is **local only** unless you pass `--push`, which publishes it with
+upstream tracking (`git push -u origin <branch>`, or `--remote <name>` for another remote).
+A PR's head branch has to exist on the remote before `kodi pr create` can open against it,
+so without `--push` there is a manual `git push` between `start` and `pr create`; `start`
+says so in its output, and `pr create` refuses with the exact push command rather than
+surfacing the provider's "unknown ref" error.
+
+Every git command kodi runs is anchored at the **project root** — the directory holding
+`.claude/kodi-dev.yaml` — so `start` works from any subdirectory of a configured project.
+If that root is not inside a git repository, `start` says exactly that and names the
+directory, on the dry run as well as the real one, instead of failing with git's bare
+`exit 128`.
 
 Every ticket is validated against a strict template before it is written or sent to the
 provider.
@@ -292,6 +315,16 @@ current one. Assigning a ticket to an iteration is a separate, board-native step
 `--iteration` on `create`/`amend` — never part of the portable ticket record itself, the
 same way `status` is always trusted from the board rather than a stored copy.
 
+**PR links on a ticket are kodi bookkeeping.** `tickets link-pr` and `hand-off --pr` write
+a `**PR:** <ref>` line into the ticket's body and nothing else — a bare number is rendered
+as `#8` on GitHub so it is at least a cross-reference. Neither one populates GitHub's
+**Development** panel ("Successfully merging this pull request may close these issues"):
+that panel has no documented public REST or GraphQL mutation, it is UI-only, so kodi cannot
+write to it. What _does_ populate it is a closing keyword in the PR body — see
+[Pull requests](#pull-requests) below, including the base-branch rule that decides whether
+the keyword works at all. `hand-off` is idempotent: re-running it on a ticket already in
+**To review** leaves the status alone and just (re-)writes the link.
+
 ### The local board
 
 With the `local` provider, tickets are separate files under `docs/tickets/`. Browse them
@@ -309,16 +342,62 @@ not to edit it. Mutations always go through the CLI.
 ### Pull requests
 
 Every PR follows a **strict template validated in code** (summary, type of change,
-included changes → features/fixes/improvements, related issues / work items, testing,
-and a checklist). Every section is always rendered — only notes is optional — so the
-created PR never collapses to a bare summary. Bodies are portable and capped so no
-provider truncates them.
+included changes → features/fixes/improvements, related issues / work items, testing —
+`unit` / `integration` / `e2e` / `manual` / `na` — and a checklist). Every section is always
+rendered — only notes is optional — so the created PR never collapses to a bare summary.
+Bodies are portable and capped so no provider truncates them.
 
 ```bash
 kodi pr create --source feat/x --target main -t "Title" -s "Summary" --yes
-kodi pr list
+kodi pr create --source slice/kodi-3 --issue 3 --issue 4 ... --yes   # → "Closes #3" / "Closes #4"
+kodi pr list                 # id, state, source → target, title
+kodi pr list --json          # machine-readable, same rows
 kodi pr abandon <id>
 ```
+
+`pr list` shows each PR's **base** branch, not just its head — when `prTarget` is overridden
+per-PR there is otherwise no way to confirm through kodi what a PR actually targets — and
+`--json` gives the same rows machine-readably, matching the `tickets` commands.
+
+#### Linking a PR to its issues (GitHub)
+
+"Related Issues / Work Items" is the one body section rendered **without** autolink
+neutralization, i.e. the section built to hold a real reference. `--issue` completes a
+recognizable ref into a closing keyword GitHub acts on:
+
+| Passed                                        | Rendered              |
+| --------------------------------------------- | --------------------- |
+| `--issue 3`, `--issue "#3"`, `--issue KODI-3` | `Closes #3`           |
+| `--issue "Fixes #3"` (already has a keyword)  | `Fixes #3`, untouched |
+| `--issue "N/A"`, a URL, free text             | untouched             |
+
+`--issue-keyword fixes` / `resolves` picks a different keyword; `--issue-keyword none` turns the
+completion off entirely and passes every entry through exactly as typed. On Azure DevOps
+entries are always passed through: its links come from `az repos pr create --work-items`,
+which parses the raw refs.
+
+**GitHub only creates the Development link when the PR's base is the repository's default
+branch.** kodi's model points `prTarget` at an integration branch, which usually is _not_
+the default branch — so the keywords render correctly, read correctly to a human, and link
+to nothing. `pr create` warns when that is the case:
+
+```
+warning: PR base "integration/0006-visual-identity" is not the repository's default branch ("main").
+```
+
+If every kodi PR targets `develop`, **making `develop` the repository's default branch** is
+what makes linking and auto-closing behave the way the Development panel implies. Azure
+DevOps has no equivalent restriction — work-item links close on completion whatever the
+target branch — so this is the one place the provider abstraction hides a real behavioural
+split between the two backends.
+
+#### When `gh` is too old
+
+`gh` 2.46 and older still query GitHub's sunset Projects (classic) API, so `gh pr edit` dies
+_inside_ `gh` before kodi's body is sent. kodi recognizes that failure and says so — naming
+the detected `gh` version and handing back a `gh api -X PATCH` workaround using the body it
+already rendered and validated — instead of passing through a raw GraphQL error that reads
+like a kodi or GitHub-API problem.
 
 ### Skill-packs
 
