@@ -18,7 +18,8 @@ export function registerUpdateCommand(program: Command, pkgName: string, current
 
       if (!res.latest) {
         process.stderr.write(
-          `kodi: could not reach the npm registry — check your connection and try again.\n`,
+          `kodi: could not read the latest version from the npm registry — check your ` +
+            `connection and try again, or run \`npm install -g ${pkgName}@latest\`.\n`,
         );
         process.exitCode = 1;
         return;

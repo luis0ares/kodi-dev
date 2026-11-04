@@ -202,7 +202,7 @@ kodi update --force    # …and reinstall even when already on the latest versio
 ```
 
 Asking for the update is the opt-in, so `kodi update` ignores both the once-a-day cache
-and `KODI_NO_AUTO_UPDATE`/CI. It exits non-zero when an update was wanted but could not be
+and `KODI_NO_AUTO_UPDATE`/CI. It also waits up to 10s for the registry, where the daily check gives up after 1.5s. It exits non-zero when an update was wanted but could not be
 installed (registry unreachable, no npm, permissions, …).
 
 ### Tickets

@@ -51,13 +51,21 @@ export function isNewerVersion(latest: string, current: string): boolean {
   return lPat > cPat;
 }
 
-/** Fetch `<pkg>`'s latest published version from the npm registry. Capped at
- * 1.5s and never throws — offline / registry-down / timeout all resolve `null`
- * so this can never be the reason a command fails. */
-async function fetchLatestFromNpm(pkgName: string): Promise<string | null> {
+/** The daily check rides along with every command, so it has to stay quick. */
+const DAILY_CHECK_TIMEOUT_MS = 1500;
+/** `kodi update` is what the human is waiting on, so a slow registry is not a failure. */
+export const FORCE_UPDATE_TIMEOUT_MS = 10_000;
+
+/** Fetch `<pkg>`'s latest published version from the npm registry. Never throws —
+ * offline / registry-down / timeout all resolve `null` so this can never be the
+ * reason a command fails. */
+async function fetchLatestFromNpm(
+  pkgName: string,
+  timeoutMs = DAILY_CHECK_TIMEOUT_MS,
+): Promise<string | null> {
   try {
     const res = await fetch(`https://registry.npmjs.org/${pkgName}/latest`, {
-      signal: AbortSignal.timeout(1500),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as { version?: unknown };
@@ -159,7 +167,8 @@ export async function forceUpdate(
 ): Promise<ForceUpdateResult> {
   const cachePath = deps.cachePath ?? defaultCachePath();
   const now = deps.now ?? Date.now;
-  const fetchLatest = deps.fetchLatest ?? fetchLatestFromNpm;
+  const fetchLatest =
+    deps.fetchLatest ?? ((pkg: string) => fetchLatestFromNpm(pkg, FORCE_UPDATE_TIMEOUT_MS));
   const run = deps.run ?? defaultRun;
 
   const latest = await fetchLatest(pkgName);

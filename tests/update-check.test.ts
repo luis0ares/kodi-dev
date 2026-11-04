@@ -2,7 +2,12 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { checkForUpdate, forceUpdate, isNewerVersion } from '../src/update-check.js';
+import {
+  checkForUpdate,
+  FORCE_UPDATE_TIMEOUT_MS,
+  forceUpdate,
+  isNewerVersion,
+} from '../src/update-check.js';
 
 // A call that omits `run` reaches defaultRun, which would reinstall the real global package.
 vi.mock('cross-spawn', () => ({ default: { sync: vi.fn(() => ({ status: 0 })) } }));
@@ -192,5 +197,45 @@ describe('forceUpdate', () => {
     });
     await checkForUpdate('kodi-dev', '1.0.0', { cachePath, now: () => 43, fetchLatest, run });
     expect(fetchLatest).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('registry timeout', () => {
+  const registryAnswers = () =>
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ version: '1.0.0' }) })),
+    );
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('keeps the daily check quick, because it rides along with every command', async () => {
+    registryAnswers();
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    await checkForUpdate('kodi-dev', '1.0.0', { cachePath, now: () => 0 });
+    expect(timeout).toHaveBeenCalledWith(1500);
+  });
+
+  it('gives kodi update longer, because the human is waiting on it', async () => {
+    registryAnswers();
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    const res = await forceUpdate('kodi-dev', '1.0.0', { cachePath, now: () => 0 });
+    expect(timeout).toHaveBeenCalledWith(FORCE_UPDATE_TIMEOUT_MS);
+    expect(FORCE_UPDATE_TIMEOUT_MS).toBeGreaterThan(1500);
+    expect(res).toEqual({ latest: '1.0.0', updated: false, alreadyLatest: true });
+  });
+
+  it('still answers null rather than throwing when the registry never answers', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new DOMException('timed out', 'TimeoutError');
+      }),
+    );
+    const res = await forceUpdate('kodi-dev', '1.0.0', { cachePath, now: () => 0 });
+    expect(res).toEqual({ latest: null, updated: false, alreadyLatest: false });
   });
 });
