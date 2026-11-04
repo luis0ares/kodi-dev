@@ -3,7 +3,7 @@ import { mdToHtml } from '../html.js';
 
 /**
  * The PR template IS this schema — same philosophy as the ticket template. A
- * draft is validated before anything is rendered or sent to gh/az.
+ * draft is validated before anything is rendered or sent to az.
  *
  * Unlike the ticket body, the PR body has a FIXED shape: every top-level section
  * (Summary, Type of Change, Included Changes, Related Issues / Work Items,
@@ -72,7 +72,7 @@ export type PrInput = z.input<typeof PrSchema>;
 export type Pr = z.infer<typeof PrSchema>;
 
 /**
- * Both GitHub and Azure DevOps turn "#" immediately followed by a number into a
+ * Azure DevOps turns "#" immediately followed by a number into a
  * link to an internal resource (issue / work item / PR). Nothing in our free-text
  * fields intends that, so break the "#<number>" adjacency with a zero-width space:
  * it renders as "#1010" but no longer autolinks. A ZWSP is used rather than a
@@ -110,7 +110,7 @@ function checkboxes(items: [label: string, on: boolean][]): string[] {
   return items.map(([label, on]) => `- [${on ? 'x' : ' '}] ${label}`);
 }
 
-/** Render the PR body as Markdown (for gh --body-file). Every section except
+/** Render the PR body as Markdown (what the body limit is measured on). Every section except
  * Notes is always present, matching the repository PR template. */
 export function renderPrMarkdown(pr: Pr): string {
   const s = neutralizeAutolinks;

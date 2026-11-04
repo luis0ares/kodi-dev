@@ -66,8 +66,8 @@ export function branchExists(
 }
 
 /**
- * Whether `remote` already carries this branch — what `gh pr create --head` /
- * `az repos pr create --source-branch` actually require. `undefined` means "could
+ * Whether `remote` already carries this branch — what `az repos pr create
+ * --source-branch` actually requires. `undefined` means "could
  * not tell" (no such remote, offline, not a repo): the caller treats that as
  * "don't block", because a false negative here would refuse a perfectly valid PR.
  */

@@ -2,10 +2,9 @@ import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import { ZodError } from 'zod';
 import { findProjectRoot, loadBoardConfig } from '../config.js';
-import { execMutate, execRead, type ExecResult } from '../exec.js';
-import { baseBranchLinkWarning, defaultBranch, explainGhFailure } from '../gh.js';
+import { execMutate, execRead } from '../exec.js';
 import { DEFAULT_REMOTE, remoteBranchExists } from '../git.js';
-import { azFileArg, writeTempFile } from '../tmpfile.js';
+import { azFileArg } from '../tmpfile.js';
 import {
   assertWithinBodyLimit,
   PrSchema,
@@ -14,16 +13,15 @@ import {
   type Pr,
 } from '../templates/pr.js';
 
-type Target = 'github' | 'azure';
-
-/** Resolve the PR backend from an explicit flag or the active provider (local has none). */
-function resolveTarget(explicit?: string): Target {
-  if (explicit === 'github' || explicit === 'azure') return explicit;
-  const p = loadBoardConfig().provider;
-  if (p === 'github' || p === 'azure') return p;
-  throw new Error(
-    `no PR target: the active provider is "${p}". Configure github/azure with \`kodi init\`, or pass --provider.`,
-  );
+/** Pull requests live on Azure DevOps; the local provider has no remote to open one on. */
+export function assertAzure(explicit?: string): void {
+  const provider = explicit ?? loadBoardConfig().provider;
+  if (provider !== 'azure') {
+    throw new Error(
+      `no PR target: pull requests need the azure provider, not "${provider}". ` +
+        `Configure it with \`kodi init\`, or pass --provider azure.`,
+    );
+  }
 }
 
 /** Fold a repeatable enum flag (e.g. `--type fix --type refactor`) into the
@@ -45,74 +43,6 @@ function checkboxFlags<K extends string>(
 
 const TYPE_KEYS = ['feature', 'fix', 'improvement', 'refactor', 'documentation'] as const;
 const TESTING_KEYS = ['unit', 'integration', 'e2e', 'manual', 'na'] as const;
-
-/**
- * The closing keyword `--issue` refs are rendered with. `none` opts out entirely
- * and passes every entry through exactly as typed.
- */
-export const ISSUE_KEYWORDS = ['closes', 'fixes', 'resolves', 'none'] as const;
-export type IssueKeyword = (typeof ISSUE_KEYWORDS)[number];
-
-/** An entry that ALREADY opens with a closing keyword — never rewritten. */
-const CLOSING_PREFIX_RE = /^(close[sd]?|fix(e[sd])?|resolve[sd]?)\s+\S/i;
-/** `3` / `#3` — a bare GitHub issue number, with or without the sigil. */
-const BARE_REF_RE = /^#?(\d+)$/;
-/** `KODI-3` / `KODI-003` — a kodi-shaped key; on GitHub the number IS the issue. */
-const PREFIXED_REF_RE = /^[A-Za-z][A-Za-z0-9]*-0*(\d+)$/;
-/** The template's "this PR references nothing" placeholder. */
-const NA_RE = /^n\/?a$/i;
-
-/**
- * Turn a Related-Issues entry into something GitHub will actually act on.
- *
- * "Related Issues / Work Items" is the one section rendered WITHOUT autolink
- * neutralization — i.e. the section deliberately built to hold a real reference —
- * but nothing used to validate or complete what was passed. `--issue 3` rendered
- * the literal text `3`: no link, no cross-reference, no closing behaviour, and no
- * warning. A human reading the PR saw it correctly attributed while GitHub had
- * nothing.
- *
- * So a recognizable reference (`3`, `#3`, `KODI-3`) becomes `Closes #3`. Anything
- * else — a URL, free text, `N/A`, or an entry that already starts with its own
- * closing keyword — is left exactly as typed.
- */
-export function normalizeRelatedIssue(entry: string, keyword: IssueKeyword = 'closes'): string {
-  const text = entry.trim();
-  if (keyword === 'none' || NA_RE.test(text) || CLOSING_PREFIX_RE.test(text)) return text;
-  const m = BARE_REF_RE.exec(text) ?? PREFIXED_REF_RE.exec(text);
-  if (!m) return text;
-  return `${keyword[0].toUpperCase()}${keyword.slice(1)} #${m[1]}`;
-}
-
-/**
- * Apply {@link normalizeRelatedIssue} across the section — GitHub only. Azure
- * gets its links from `az repos pr create --work-items` (see
- * {@link azureWorkItemIds}), which parses the raw refs and would not recognize a
- * keyword-prefixed entry, so Azure entries are passed through untouched.
- */
-export function normalizeRelatedIssues(
-  entries: string[],
-  target: Target,
-  keyword: IssueKeyword = 'closes',
-): string[] {
-  if (target !== 'github') return entries;
-  return entries.map((e) => normalizeRelatedIssue(e, keyword));
-}
-
-function parseIssueKeyword(value: unknown): IssueKeyword {
-  const v = String(value ?? 'closes').toLowerCase();
-  if (!(ISSUE_KEYWORDS as readonly string[]).includes(v)) {
-    throw new Error(
-      `--issue-keyword: unknown value "${value}" (allowed: ${ISSUE_KEYWORDS.join(', ')})`,
-    );
-  }
-  return v as IssueKeyword;
-}
-
-/** Whether any entry would rely on GitHub's closing-keyword behaviour. */
-export function hasClosingKeyword(entries: string[]): boolean {
-  return entries.some((e) => CLOSING_PREFIX_RE.test(e.trim()));
-}
 
 /** The template is enforced entirely by {@link PrSchema}. Re-throw a Zod failure
  * as a readable, section-by-section message instead of a raw JSON dump. */
@@ -149,9 +79,8 @@ function draftFromOptions(o: Record<string, unknown>): Pr {
 
 /**
  * Refuse a PR whose head branch was never published, with the push command
- * spelled out. `gh pr create --head` / `az repos pr create --source-branch`
- * both fail on a local-only branch, and their own errors describe an unknown
- * ref rather than the one thing that fixes it. `kodi tickets start` cuts the
+ * spelled out. `az repos pr create --source-branch` fails on a local-only branch,
+ * and its own error describes an unknown ref rather than the one thing that fixes it. `kodi tickets start` cuts the
  * slice branch locally, so this is the normal state right after `start`.
  * A remote we cannot interrogate (offline, no such remote) never blocks.
  */
@@ -169,40 +98,12 @@ export function assertSourcePublished(
   );
 }
 
-export function githubCreateArgs(
-  pr: Pr,
-  bodyFile: string,
-  source: string,
-  target: string,
-  repo?: string,
-  draft = false,
-): string[] {
-  const args = [
-    'gh',
-    'pr',
-    'create',
-    '--title',
-    pr.title,
-    '--body-file',
-    bodyFile,
-    '--base',
-    target,
-    '--head',
-    source,
-  ];
-  // gh's --draft is a plain boolean flag; presence opens the PR as a draft.
-  if (draft) args.push('--draft');
-  for (const r of pr.reviewers) args.push('--reviewer', r);
-  if (repo) args.push('--repo', repo);
-  return args;
-}
-
 /**
  * Pull Azure work-item IDs out of the free-form "Related Issues / Work Items"
  * entries so `az repos pr create` can actually LINK them (`--work-items`) instead
  * of merely printing them in the description. Accepts a bare id ("123"), a "#123"
  * reference, and Azure's "AB#123" mention form; ignores "N/A" and any non-numeric
- * ref (e.g. a GitHub-style "AUTH-9"). Deduplicated, order-preserving.
+ * ref (e.g. a prefixed key like "AUTH-9"). Deduplicated, order-preserving.
  */
 export function azureWorkItemIds(relatedIssues: string[]): string[] {
   const ids: string[] = [];
@@ -251,14 +152,6 @@ export function azureCreateArgs(
   return args;
 }
 
-export function githubEditArgs(id: string, pr: Pr, bodyFile: string, repo?: string): string[] {
-  const args = ['gh', 'pr', 'edit', id, '--title', pr.title, '--body-file', bodyFile];
-  // gh pr edit only adds reviewers (it cannot remove); safe for a body/title edit.
-  for (const r of pr.reviewers) args.push('--add-reviewer', r);
-  if (repo) args.push('--repo', repo);
-  return args;
-}
-
 /** `descriptionArg` comes from {@link azFileArg} — inline HTML everywhere, an
  * `@<file>` reference on Windows, whose `.cmd` shim truncates a multi-line value. */
 export function azureUpdateArgs(id: string, pr: Pr, descriptionArg: string): string[] {
@@ -277,20 +170,7 @@ export function azureUpdateArgs(id: string, pr: Pr, descriptionArg: string): str
   ];
 }
 
-/**
- * Run a gh/az mutation, translating a failure that came out of `gh` itself
- * (rather than out of GitHub's answer) into an explanation with a fix — see
- * {@link explainGhFailure}. Anything unrecognized propagates untouched.
- */
-function runPrMutation(args: string[], dryRun: boolean, bodyFile?: string): ExecResult {
-  try {
-    return execMutate(args, dryRun);
-  } catch (err) {
-    throw explainGhFailure(err, { bodyFile });
-  }
-}
-
-/** One pull request, normalized across providers for `pr list`. */
+/** One pull request, as `pr list` shows it. */
 export interface PrListRow {
   id: string;
   title: string;
@@ -304,7 +184,7 @@ export interface PrListRow {
   author?: string;
 }
 
-/** Azure returns fully-qualified refs (`refs/heads/main`); GitHub returns names. */
+/** Azure returns fully-qualified refs (`refs/heads/main`). */
 function shortRef(ref: unknown): string {
   return String(ref ?? '').replace(/^refs\/heads\//, '');
 }
@@ -320,28 +200,6 @@ function jsonRows(json: string): Record<string, unknown>[] {
 /** An optional string field: present and non-empty, or absent. */
 function optional(value: unknown): string | undefined {
   return value ? String(value) : undefined;
-}
-
-export function githubListArgs(repo?: string): string[] {
-  return [
-    'gh',
-    'pr',
-    'list',
-    '--json',
-    'number,title,headRefName,baseRefName,state,updatedAt',
-    ...(repo ? ['--repo', repo] : []),
-  ];
-}
-
-export function parseGithubPrList(json: string): PrListRow[] {
-  return jsonRows(json).map((r) => ({
-    id: String(r.number ?? ''),
-    title: String(r.title ?? ''),
-    source: shortRef(r.headRefName),
-    target: shortRef(r.baseRefName),
-    state: String(r.state ?? ''),
-    updated: optional(r.updatedAt),
-  }));
 }
 
 export function azureListArgs(repo?: string): string[] {
@@ -401,15 +259,9 @@ function addTemplateOptions(cmd: Command): Command {
     )
     .option(
       '--issue <ref>',
-      'related issue / work item (repeatable). On github a bare ref (3, #3, KODI-3) ' +
-        'is rendered as a closing keyword ("Closes #3") so GitHub actually links it',
+      'related issue / work item (repeatable). 123, #123 and AB#123 link the work item',
       collect,
       [],
-    )
-    .option(
-      '--issue-keyword <word>',
-      `closing keyword --issue refs are rendered with: ${ISSUE_KEYWORDS.join('|')} (github only)`,
-      'closes',
     )
     .option('--reviewer <name>', 'reviewer (repeatable)', collect, [])
     .option('--notes <text>');
@@ -418,20 +270,20 @@ function addTemplateOptions(cmd: Command): Command {
 export function registerPrCommand(program: Command) {
   const pr = program
     .command('pr')
-    .description('Manage pull requests (proxy gh/az) with a validated template');
+    .description('Manage pull requests (proxy az) with a validated template');
 
   addTemplateOptions(pr.command('create'))
     .description('Create a PR from a validated template draft')
     .requiredOption('--source <branch>', 'branch the PR is opened from')
     .option('--target <branch>', 'branch the PR merges into (default: prTarget from kodi init)')
-    .option('--provider <github|azure>', 'override the PR provider')
-    .option('--repository <repo>', 'repository (gh: OWNER/REPO; az: name)')
+    .option('--provider <azure>', 'open it on Azure DevOps even when the board is local')
+    .option('--repository <repo>', 'repository (name)')
     .option('--draft', 'open the PR in draft / work-in-progress (non-active) mode', false)
     .option('--remote <name>', 'git remote the head branch must exist on', DEFAULT_REMOTE)
     .option('--yes', 'execute (default: dry-run)', false)
     .action((o) => {
       const draft = draftFromOptions(o);
-      const provider = resolveTarget(o.provider);
+      assertAzure(o.provider);
       const cfg = loadBoardConfig();
       const repo = o.repository ?? cfg.repository;
       // Fall back to the default target branch chosen at `kodi init` (prTarget).
@@ -444,33 +296,14 @@ export function registerPrCommand(program: Command) {
       // The head branch must be ON the remote — checked before anything is
       // rendered or previewed, so a dry-run predicts the real run.
       assertSourcePublished(o.source, findProjectRoot(), undefined, o.remote);
-      draft.relatedIssues = normalizeRelatedIssues(
-        draft.relatedIssues,
-        provider,
-        parseIssueKeyword(o.issueKeyword),
-      );
       // Enforce the 4000-char ceiling on the canonical markdown body before we
-      // hand anything to gh/az — refuse rather than let a provider reject/truncate.
-      const body = renderPrMarkdown(draft);
-      assertWithinBodyLimit(body);
-      let args: string[];
-      let bodyFile: string | undefined;
-      if (provider === 'github') {
-        // Closing keywords only link on a default-branch base — say so up front
-        // rather than let the Development panel silently stay empty.
-        if (hasClosingKeyword(draft.relatedIssues)) {
-          const warning = baseBranchLinkWarning(targetBranch, defaultBranch(repo));
-          if (warning) process.stderr.write(warning);
-        }
-        bodyFile = writeTempFile(body, 'kodi-pr-', 'body.md');
-        args = githubCreateArgs(draft, bodyFile, o.source, targetBranch, repo, o.draft);
-      } else {
-        // On Windows this becomes an `@file` ref (the `.cmd` shim truncates a
-        // multi-line value); everywhere else it stays the inline HTML body.
-        const descriptionArg = azFileArg(renderPrHtml(draft), 'kodi-pr-');
-        args = azureCreateArgs(draft, descriptionArg, o.source, targetBranch, repo, o.draft);
-      }
-      const res = runPrMutation(args, !o.yes, bodyFile);
+      // hand anything to az — refuse rather than let the provider reject/truncate.
+      assertWithinBodyLimit(renderPrMarkdown(draft));
+      // On Windows this becomes an `@file` ref (the `.cmd` shim truncates a
+      // multi-line value); everywhere else it stays the inline HTML body.
+      const descriptionArg = azFileArg(renderPrHtml(draft), 'kodi-pr-');
+      const args = azureCreateArgs(draft, descriptionArg, o.source, targetBranch, repo, o.draft);
+      const res = execMutate(args, !o.yes);
       if (res.ran)
         process.stdout.write(
           (res.stdout.trim() || `${o.draft ? 'Draft PR' : 'PR'} created`) + '\n',
@@ -479,64 +312,40 @@ export function registerPrCommand(program: Command) {
 
   addTemplateOptions(pr.command('edit <id>'))
     .description('Edit an existing PR: re-render its body/title from a validated template draft')
-    .option('--provider <github|azure>', 'override the PR provider')
-    .option('--repository <repo>', 'repository (gh: OWNER/REPO; az: name)')
+    .option('--provider <azure>', 'edit it on Azure DevOps even when the board is local')
     .option('--yes', 'execute (default: dry-run)', false)
     .action((id: string, o: Record<string, unknown>) => {
       const draft = draftFromOptions(o);
-      const target = resolveTarget(o.provider as string | undefined);
-      const repo = (o.repository as string) ?? loadBoardConfig().repository;
-      draft.relatedIssues = normalizeRelatedIssues(
-        draft.relatedIssues,
-        target,
-        parseIssueKeyword(o.issueKeyword),
-      );
+      assertAzure(o.provider as string | undefined);
       // Same body contract as create — the full template is re-validated and re-rendered.
-      const body = renderPrMarkdown(draft);
-      assertWithinBodyLimit(body);
-      let args: string[];
-      let bodyFile: string | undefined;
-      if (target === 'github') {
-        bodyFile = writeTempFile(body, 'kodi-pr-', 'body.md');
-        args = githubEditArgs(id, draft, bodyFile, repo);
-      } else {
-        // On Windows this becomes an `@file` ref (the `.cmd` shim truncates a
-        // multi-line value); everywhere else it stays the inline HTML body.
-        args = azureUpdateArgs(id, draft, azFileArg(renderPrHtml(draft), 'kodi-pr-'));
-      }
-      const res = runPrMutation(args, !(o.yes as boolean), bodyFile);
+      assertWithinBodyLimit(renderPrMarkdown(draft));
+      // On Windows this becomes an `@file` ref (the `.cmd` shim truncates a
+      // multi-line value); everywhere else it stays the inline HTML body.
+      const args = azureUpdateArgs(id, draft, azFileArg(renderPrHtml(draft), 'kodi-pr-'));
+      const res = execMutate(args, !(o.yes as boolean));
       if (res.ran) process.stdout.write((res.stdout.trim() || 'PR updated') + '\n');
     });
 
   pr.command('list')
     .description('List open pull requests (id, state, source → target, title)')
-    .option('--provider <github|azure>', 'override the PR provider')
+    .option('--provider <azure>', 'list Azure DevOps PRs even when the board is local')
     .option('--repository <repo>')
     .option('--json', 'machine-readable output', false)
     .action((o) => {
-      const target = resolveTarget(o.provider);
+      assertAzure(o.provider);
       const repo = o.repository ?? loadBoardConfig().repository;
-      const rows =
-        target === 'github'
-          ? parseGithubPrList(execRead(githubListArgs(repo)))
-          : parseAzurePrList(execRead(azureListArgs(repo)));
+      const rows = parseAzurePrList(execRead(azureListArgs(repo)));
       if (o.json) process.stdout.write(JSON.stringify(rows) + '\n');
       else process.stdout.write(renderPrList(rows) + '\n');
     });
 
   pr.command('abandon <id>')
-    .description('Abandon/close a pull request')
-    .option('--provider <github|azure>', 'override the PR provider')
-    .option('--repository <repo>')
+    .description('Abandon a pull request')
+    .option('--provider <azure>', 'abandon it on Azure DevOps even when the board is local')
     .option('--yes', 'execute (default: dry-run)', false)
     .action((id, o) => {
-      const target = resolveTarget(o.provider);
-      const repo = o.repository ?? loadBoardConfig().repository;
-      const args =
-        target === 'github'
-          ? ['gh', 'pr', 'close', id, ...(repo ? ['--repo', repo] : [])]
-          : ['az', 'repos', 'pr', 'update', '--id', id, '--status', 'abandoned'];
-      runPrMutation(args, !o.yes);
+      assertAzure(o.provider);
+      execMutate(['az', 'repos', 'pr', 'update', '--id', id, '--status', 'abandoned'], !o.yes);
     });
 
   return pr;

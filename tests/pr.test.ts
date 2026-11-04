@@ -1,18 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertAzure,
   assertSourcePublished,
   azureCreateArgs,
   azureListArgs,
   azureUpdateArgs,
   azureWorkItemIds,
-  githubCreateArgs,
-  githubEditArgs,
-  githubListArgs,
-  hasClosingKeyword,
-  normalizeRelatedIssue,
-  normalizeRelatedIssues,
   parseAzurePrList,
-  parseGithubPrList,
   renderPrList,
 } from '../src/commands/pr.js';
 import {
@@ -234,40 +228,6 @@ describe('pr command construction', () => {
     expect(args).not.toContain('--work-items');
   });
 
-  it('builds a github create command (markdown body-file, base/head, reviewers, repo)', () => {
-    const args = githubCreateArgs(
-      draft({ reviewers: ['octocat'] }),
-      '/tmp/body.md',
-      'feat/x',
-      'main',
-      'acme/app',
-    );
-    expect(args.slice(0, 5)).toEqual(['gh', 'pr', 'create', '--title', 'Add dataset import']);
-    expect(args).toContain('--body-file');
-    expect(args).toContain('/tmp/body.md');
-    expect(args.slice(-2)).toEqual(['--repo', 'acme/app']);
-    expect(args).toContain('--base');
-    expect(args).toContain('--head');
-    expect(args).toContain('--reviewer');
-    expect(args).toContain('octocat');
-  });
-
-  it('builds a github edit command (id, title, body-file, add-reviewer, repo)', () => {
-    const args = githubEditArgs(
-      '42',
-      draft({ reviewers: ['octocat'] }),
-      '/tmp/body.md',
-      'acme/app',
-    );
-    expect(args.slice(0, 4)).toEqual(['gh', 'pr', 'edit', '42']);
-    expect(args).toContain('--title');
-    expect(args).toContain('--body-file');
-    expect(args).toContain('/tmp/body.md');
-    expect(args).toContain('--add-reviewer');
-    expect(args).toContain('octocat');
-    expect(args.slice(-2)).toEqual(['--repo', 'acme/app']);
-  });
-
   it('builds an azure update command (identified by --id, no --repository)', () => {
     const args = azureUpdateArgs('42', draft(), '<p>x</p>');
     expect(args.slice(0, 5)).toEqual(['az', 'repos', 'pr', 'update', '--id']);
@@ -310,10 +270,6 @@ describe('pr command construction', () => {
   });
 
   it('omits --draft by default and adds it when requested', () => {
-    expect(githubCreateArgs(draft(), '/tmp/body.md', 'feat/x', 'main')).not.toContain('--draft');
-    expect(githubCreateArgs(draft(), '/tmp/body.md', 'feat/x', 'main', undefined, true)).toContain(
-      '--draft',
-    );
     expect(azureCreateArgs(draft(), '<p>x</p>', 'feat/x', 'main')).not.toContain('--draft');
     // az takes an explicit boolean value after --draft
     const az = azureCreateArgs(draft(), '<p>x</p>', 'feat/x', 'main', undefined, true);
@@ -342,75 +298,6 @@ describe('--testing e2e', () => {
   });
 });
 
-describe('normalizeRelatedIssue', () => {
-  it('completes a bare ref into a closing keyword GitHub acts on', () => {
-    expect(normalizeRelatedIssue('3')).toBe('Closes #3');
-    expect(normalizeRelatedIssue('#3')).toBe('Closes #3');
-    expect(normalizeRelatedIssue(' 3 ')).toBe('Closes #3');
-  });
-
-  it('accepts a kodi-shaped key — on GitHub the number IS the issue', () => {
-    expect(normalizeRelatedIssue('KODI-3')).toBe('Closes #3');
-    expect(normalizeRelatedIssue('KODI-003')).toBe('Closes #3');
-  });
-
-  it('honours the chosen keyword, and passes everything through on "none"', () => {
-    expect(normalizeRelatedIssue('3', 'fixes')).toBe('Fixes #3');
-    expect(normalizeRelatedIssue('3', 'resolves')).toBe('Resolves #3');
-    expect(normalizeRelatedIssue('3', 'none')).toBe('3');
-  });
-
-  it('never rewrites an entry that already carries its own keyword', () => {
-    for (const entry of ['Closes #3', 'fixes #3', 'Resolved #3', 'Fix #12']) {
-      expect(normalizeRelatedIssue(entry)).toBe(entry);
-    }
-  });
-
-  it('leaves the N/A placeholder, URLs and free text alone', () => {
-    expect(normalizeRelatedIssue('N/A')).toBe('N/A');
-    expect(normalizeRelatedIssue('n/a')).toBe('n/a');
-    expect(normalizeRelatedIssue('https://github.com/o/r/issues/3')).toBe(
-      'https://github.com/o/r/issues/3',
-    );
-    expect(normalizeRelatedIssue('see the tracking epic')).toBe('see the tracking epic');
-  });
-});
-
-describe('normalizeRelatedIssues', () => {
-  it('applies on github', () => {
-    expect(normalizeRelatedIssues(['3', '#4', 'N/A'], 'github')).toEqual([
-      'Closes #3',
-      'Closes #4',
-      'N/A',
-    ]);
-  });
-
-  it('leaves azure untouched — its links come from --work-items, which parses raw refs', () => {
-    expect(normalizeRelatedIssues(['123', 'AB#456'], 'azure')).toEqual(['123', 'AB#456']);
-    // …and the raw refs still resolve to work-item ids after passing through.
-    expect(azureWorkItemIds(normalizeRelatedIssues(['123', 'AB#456'], 'azure'))).toEqual([
-      '123',
-      '456',
-    ]);
-  });
-
-  it('renders the completed reference without neutralizing its "#"', () => {
-    const pr = draft({ relatedIssues: normalizeRelatedIssues(['3'], 'github') });
-    const md = renderPrMarkdown(pr);
-    expect(md).toContain('- Closes #3');
-    expect(md).not.toContain('#​3'); // the ZWSP guard must not reach this section
-  });
-});
-
-describe('hasClosingKeyword', () => {
-  it('detects the entries that depend on GitHub linking them', () => {
-    expect(hasClosingKeyword(['Closes #3'])).toBe(true);
-    expect(hasClosingKeyword(['N/A', 'Fixes #9'])).toBe(true);
-    expect(hasClosingKeyword(['N/A'])).toBe(false);
-    expect(hasClosingKeyword(['#3'])).toBe(false);
-  });
-});
-
 describe('assertSourcePublished', () => {
   it('passes when the branch is on the remote', () => {
     expect(() =>
@@ -418,7 +305,7 @@ describe('assertSourcePublished', () => {
     ).not.toThrow();
   });
 
-  it('names the push command instead of letting gh report an unknown ref', () => {
+  it('names the push command instead of letting az report an unknown ref', () => {
     const empty = () => '';
     expect(() => assertSourcePublished('slice/kodi-2', '/repo', empty)).toThrow(
       /does not exist on origin/,
@@ -438,13 +325,6 @@ describe('assertSourcePublished', () => {
 });
 
 describe('pr list', () => {
-  it('asks github for the base branch, which the old listing omitted entirely', () => {
-    const args = githubListArgs('Owner/repo');
-    expect(args[args.indexOf('--json') + 1]).toContain('baseRefName');
-    expect(args).toContain('--repo');
-    expect(githubListArgs()).not.toContain('--repo');
-  });
-
   it('asks azure for json, with the repository only when one is configured', () => {
     expect(azureListArgs('Repo')).toEqual([
       'az',
@@ -457,31 +337,6 @@ describe('pr list', () => {
       'Repo',
     ]);
     expect(azureListArgs()).not.toContain('--repository');
-  });
-
-  it('normalizes a github listing', () => {
-    const rows = parseGithubPrList(
-      JSON.stringify([
-        {
-          number: 8,
-          title: 'feat: slice 3',
-          headRefName: 'slice/kodi-3',
-          baseRefName: 'integration/0006-visual-identity',
-          state: 'OPEN',
-          updatedAt: '2026-09-16T09:04:39Z',
-        },
-      ]),
-    );
-    expect(rows).toEqual([
-      {
-        id: '8',
-        title: 'feat: slice 3',
-        source: 'slice/kodi-3',
-        target: 'integration/0006-visual-identity',
-        state: 'OPEN',
-        updated: '2026-09-16T09:04:39Z',
-      },
-    ]);
   });
 
   it('normalizes an azure listing, shortening its fully-qualified refs', () => {
@@ -526,6 +381,14 @@ describe('pr list', () => {
 
   it('says so rather than printing nothing on an empty board', () => {
     expect(renderPrList([])).toBe('No open pull requests.');
-    expect(parseGithubPrList('')).toEqual([]);
+    expect(parseAzurePrList('')).toEqual([]);
+  });
+});
+
+describe('assertAzure', () => {
+  it('passes for azure and refuses anything else, naming what it got', () => {
+    expect(() => assertAzure('azure')).not.toThrow();
+    expect(() => assertAzure('local')).toThrow(/need the azure provider, not "local"/);
+    expect(() => assertAzure('github')).toThrow(/need the azure provider, not "github"/);
   });
 });

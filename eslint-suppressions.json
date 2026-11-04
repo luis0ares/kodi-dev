@@ -18,15 +18,5 @@
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
-  },
-  "src/providers/github-discovery.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 7
-    }
-  },
-  "src/providers/github.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 2
-    }
   }
 }

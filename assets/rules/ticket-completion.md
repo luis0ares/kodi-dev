@@ -1,7 +1,7 @@
 # Rule: ticket completion on remote boards
 
-**Applies when** the `provider` attribute in `.claude/kodi-dev.yaml` is `github` or
-`azure` (a remote board). If `provider` is `local`, this rule does not apply.
+**Applies when** the `provider` attribute in `.claude/kodi-dev.yaml` is `azure` (a
+remote board). If `provider` is `local`, this rule does not apply.
 
 Board column names are **not** hardcoded — read them from the `columns` map in
 `.claude/kodi-dev.yaml` (`columns.toReview`, `columns.done`, …). Refer to the config

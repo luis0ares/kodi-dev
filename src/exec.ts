@@ -2,12 +2,12 @@ import type { SpawnSyncReturns } from 'node:child_process';
 import spawn from 'cross-spawn';
 
 /**
- * The CLI is the sole owner of `gh`/`az` calls (proxy). Reads always execute;
+ * The CLI is the sole owner of `az` calls (proxy). Reads always execute;
  * mutations are gated by dry-run so a remote board/PR is never changed silently
  * — the command is shown and only runs with `--yes` (dryRun=false).
  *
- * Spawns go through `cross-spawn` (never `shell: true`): on Windows `gh`/`az` are
- * `.cmd` shims that Node's own spawn refuses to launch (fails with ENOENT and
+ * Spawns go through `cross-spawn` (never `shell: true`): on Windows `az` is a
+ * `.cmd` shim that Node's own spawn refuses to launch (fails with ENOENT and
  * `status === null`, i.e. the misleading "exit null"). cross-spawn resolves the
  * shim AND escapes arguments, so kodi keeps its shell-free posture — no injection
  * surface even though ticket titles / HTML descriptions flow through as args.

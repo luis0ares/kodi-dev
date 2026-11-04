@@ -1,11 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
-import {
-  DEFAULT_WORKTREES_DIR,
-  findProjectRoot,
-  loadBoardConfig,
-  type ProviderName,
-} from '../config.js';
+import { DEFAULT_WORKTREES_DIR, findProjectRoot, loadBoardConfig } from '../config.js';
 import { DEFAULT_REMOTE, startAutopilotGit, startSliceGit } from '../git.js';
 import { LegacyDataError, type LegacyDataReport } from '../providers/local.js';
 import { resolveProvider } from '../providers/index.js';
@@ -17,24 +12,6 @@ import {
   type Ticket,
   type TicketStatus,
 } from '../templates/ticket.js';
-
-/**
- * Make a PR reference readable in the ticket body it is written into.
- *
- * `link-pr` / `hand-off --pr` are kodi-internal BOOKKEEPING: they render a
- * `**PR:** <ref>` line into the issue/work-item body. Nothing they do — and
- * nothing GitHub exposes — populates the PR sidebar's Development panel, which
- * has no documented public REST or GraphQL mutation and is UI-only. What they
- * can do is store a value that is at least a cross-reference: `--pr 8` used to
- * render the inert literal `8`, so on GitHub a bare number becomes `#8`.
- * Azure work-item bodies are HTML with their own linkifier and their PR links
- * come from `az repos pr create --work-items`, so refs there are left as typed.
- */
-export function normalizePrRef(ref: string, provider: ProviderName): string {
-  const text = ref.trim();
-  if (provider !== 'github') return text;
-  return /^\d+$/.test(text) ? `#${text}` : text;
-}
 
 function out(data: unknown, json: boolean, human: () => string) {
   if (json) process.stdout.write(JSON.stringify(data) + '\n');
@@ -106,7 +83,7 @@ async function warnUnknownDependencies(
 export function registerTicketsCommand(program: Command) {
   const tickets = program
     .command('tickets')
-    .description('Manage tickets across the active provider (local / github / azure)');
+    .description('Manage tickets across the active provider (local / azure)');
 
   tickets
     .command('create')
@@ -121,24 +98,12 @@ export function registerTicketsCommand(program: Command) {
     .option('--adr <ref>', 'ADR driver (repeatable)', collect, [])
     .option('--security <ref>', 'security driver')
     .option('--notes <text>')
-    .option('--iteration <name>', 'assign to an iteration/sprint (azure/github only)')
-    .option(
-      '--repository <repo>',
-      'file the ticket in another repository (github only: OWNER/REPO)',
-    )
-    .option(
-      '--no-project',
-      'create the issue only — do not add it to the Projects v2 board (github only)',
-    )
+    .option('--iteration <name>', 'assign to an iteration/sprint (azure only)')
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (o) => {
       const draft = draftFromOptions(o);
-      const provider = resolveProvider(process.cwd(), {
-        yes: o.yes,
-        repository: o.repository,
-        noProject: o.project === false,
-      });
+      const provider = resolveProvider(process.cwd(), { yes: o.yes });
       await warnUnknownDependencies(provider, draft.dependencies);
       try {
         let created: Awaited<ReturnType<typeof provider.create>> & { iteration?: string } =
@@ -176,11 +141,11 @@ export function registerTicketsCommand(program: Command) {
     .option('-a, --all', 'include the Done column', false)
     .option(
       '--iteration <name>',
-      'list one iteration/sprint instead of the current one (azure/github only)',
+      'list one iteration/sprint instead of the current one (azure only)',
     )
     .option(
       '--all-iterations',
-      'disable iteration filtering — list tickets from every sprint (azure/github only)',
+      'disable iteration filtering — list tickets from every sprint (azure only)',
       false,
     )
     .option('--json', 'machine-readable output', false)
@@ -206,7 +171,7 @@ export function registerTicketsCommand(program: Command) {
 
   tickets
     .command('iterations')
-    .description('List all iterations/sprints (azure/github only)')
+    .description('List all iterations/sprints (azure only)')
     .option('--json', 'machine-readable output', false)
     .action(async (o) => {
       const its = await resolveProvider().listIterations();
@@ -288,7 +253,7 @@ export function registerTicketsCommand(program: Command) {
   tickets
     .command('start <key>')
     .description(
-      'Mark a ticket started (In progress, assigned to you on github/azure) and cut its ' +
+      'Mark a ticket started (In progress, assigned to you on azure) and cut its ' +
         'slice/kodi-<id> branch — or an isolated worktree with --worktree, or the worktree ' +
         'an autopilot run shares with --autopilot',
     )
@@ -419,7 +384,7 @@ export function registerTicketsCommand(program: Command) {
     .option('--ac <criterion>', 'replace acceptance criteria (repeatable)', collect, [])
     .option('--dep <key>', 'replace dependencies (repeatable)', collect, [])
     .option('--pr <ref>', 'link a PR')
-    .option('--iteration <name>', 'assign to an iteration/sprint (azure/github only)')
+    .option('--iteration <name>', 'assign to an iteration/sprint (azure only)')
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
@@ -450,16 +415,14 @@ export function registerTicketsCommand(program: Command) {
   tickets
     .command('link-pr <key> <pr>')
     .description(
-      "Record a pull request on the ticket — writes a **PR:** line into the ticket's " +
-        "body. kodi bookkeeping only: it does not populate GitHub's Development panel",
+      "Record a pull request on the ticket — writes a **PR:** line into the ticket's body",
     )
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, pr, o) => {
       key = canonicalizeTicketKey(key);
-      const ref = normalizePrRef(pr, loadBoardConfig(process.cwd()).provider);
-      const t = await resolveProvider(process.cwd(), { yes: o.yes }).amend(key, { prUrl: ref });
-      out(t, o.json, () => `${t.key} ↔ ${ref}`);
+      const t = await resolveProvider(process.cwd(), { yes: o.yes }).amend(key, { prUrl: pr });
+      out(t, o.json, () => `${t.key} ↔ ${pr}`);
     });
 
   tickets
@@ -504,7 +467,7 @@ export function registerTicketsCommand(program: Command) {
     .action(async (key, o) => {
       key = canonicalizeTicketKey(key);
       const provider = resolveProvider(process.cwd(), { yes: o.yes });
-      const ref = o.pr ? normalizePrRef(o.pr, loadBoardConfig(process.cwd()).provider) : undefined;
+      const ref: string | undefined = o.pr;
       if (ref) await provider.amend(key, { prUrl: ref });
       const t = await provider.setStatus(key, 'To review');
       out(t, o.json, () => `${t.key} → ${t.status}${ref ? ` (PR ${ref})` : ''}`);

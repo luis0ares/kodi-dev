@@ -69,7 +69,7 @@ command to produce the artifacts. You coordinate through durable artifacts in
 ## Tools
 
 - Manage tickets and PRs ONLY through the \`kodi\` CLI (\`kodi tickets …\`,
-  \`kodi pr …\`) — it proxies \`gh\`/\`az\` and enforces the templates. Remote
+  \`kodi pr …\`) — it proxies \`az\` and enforces the templates. Remote
   mutations are dry-run unless \`--yes\`.
 - The thin \`CLAUDE.md\` is the single source of truth for the stack, gate
   commands, provider, and installed skill-packs.

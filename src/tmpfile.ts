@@ -4,10 +4,9 @@ import { join } from 'node:path';
 
 /**
  * Write `content` to a fresh, uniquely-named temp file and return its absolute
- * path. The single home for the temp-file dance both proxies need: `gh` reads a
- * body from `--body-file <path>`, and `az` reads a value from `--description
- * @<path>` (see {@link azFileArg}). Each call gets its own `mkdtemp` directory so
- * concurrent creates never collide.
+ * path, for the temp-file dance the `az` proxy needs: it reads a value from
+ * `--description @<path>` (see {@link azFileArg}). Each call gets its own `mkdtemp`
+ * directory so concurrent creates never collide.
  */
 export function writeTempFile(content: string, prefix: string, name: string): string {
   const file = join(mkdtempSync(join(tmpdir(), prefix)), name);
