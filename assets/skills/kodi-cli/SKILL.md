@@ -78,6 +78,7 @@ kodi tickets set-status KODI-003 "In progress" --yes
 kodi tickets start KODI-003 --yes             # → In progress, assigns you, cuts slice/kodi-KODI-003
 kodi tickets start KODI-003 --worktree --yes  # …or an isolated worktree instead
 kodi tickets start KODI-004 --no-branch --yes # bundling onto a branch another `start` already cut
+kodi tickets start KODI-005 --autopilot proposal-links --yes  # the worktree an autopilot run shares
 kodi tickets amend KODI-003 -s "New summary" --ac "New AC" --notes "…" --yes
 kodi tickets link-pr KODI-003 <pr-url-or-id> --yes
 kodi tickets hand-off KODI-003 --pr <pr-url-or-id> --yes     # → To review, links the PR
@@ -95,6 +96,12 @@ kodi tickets delete KODI-003 --yes
   branch/worktree creation entirely — use it when
   bundling several tickets onto one branch: only the first `start` in the batch
   omits it. `--worktree` and `--no-branch` are mutually exclusive (rejected).
+- `--autopilot <slug>` is what `/kodi.autopilot` uses: one worktree at
+  `.claude/worktrees/<slug>` on a branch named `<slug>`, instead of `slice/kodi-<id>`.
+  The first ticket of a run cuts it, each later ticket reuses it. It refuses a slug that
+  is not lowercase kebab-case, that names `sourceBranch` or `prTarget`, or that already
+  exists on the remote. `--base <ref>` bases a NEW branch on that ref instead of
+  `sourceBranch`. Neither combines with `--no-branch`.
 
 > Never move a ticket to `Done` yourself — that is the human's call on merge.
 

@@ -502,6 +502,16 @@ describe('pr list', () => {
     expect(rows[0].id).toBe('42');
   });
 
+  it('names who opened an azure PR, and stays silent when azure does not say', () => {
+    const rows = parseAzurePrList(
+      JSON.stringify([
+        { pullRequestId: 1, createdBy: { displayName: 'Ana' } },
+        { pullRequestId: 2 },
+      ]),
+    );
+    expect(rows.map((r) => r.author)).toEqual(['Ana', undefined]);
+  });
+
   it('renders the target branch on every row', () => {
     const out = renderPrList([
       { id: '8', title: 'feat: slice 3', source: 'slice/kodi-3', target: 'develop', state: 'OPEN' },

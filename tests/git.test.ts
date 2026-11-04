@@ -1,10 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  assertAutopilotSlug,
   assertGitRepo,
   branchExists,
   gitArgs,
   remoteBranchExists,
   sliceBranchName,
+  startAutopilotGit,
   startSliceGit,
   type StartGitDeps,
 } from '../src/git.js';
@@ -378,5 +384,182 @@ describe('startSliceGit', () => {
     );
 
     expect(result.worktreePath).toBe('/repo/tmp/wt/slice-kodi-KODI-003');
+  });
+});
+
+describe('assertAutopilotSlug', () => {
+  it('accepts lowercase kebab-case', () => {
+    expect(() => assertAutopilotSlug('proposal-links', [])).not.toThrow();
+    expect(() => assertAutopilotSlug('b2b', [])).not.toThrow();
+  });
+
+  it.each(['slice/kodi-1', 'Proposal-Links', 'trailing-', '-leading', 'two--dashes', 'a b', ''])(
+    'refuses %j, which could not name a branch, a directory and a report',
+    (slug) => {
+      expect(() => assertAutopilotSlug(slug, [])).toThrow(/not a slug/);
+    },
+  );
+
+  it('refuses an integration branch, however the ref was spelled', () => {
+    expect(() => assertAutopilotSlug('develop', ['develop'])).toThrow(/integration branch/);
+    expect(() => assertAutopilotSlug('develop', ['origin/develop'])).toThrow(/integration branch/);
+    expect(() => assertAutopilotSlug('develop', [undefined, 'main'])).not.toThrow();
+  });
+});
+
+describe('startAutopilotGit', () => {
+  const opts = { worktreesDir: '.claude/worktrees', root: '/repo', dryRun: false };
+
+  it('cuts the worktree on the slug from the base, never a slice/kodi-<id> branch', () => {
+    const mutate = vi.fn();
+    const res = startAutopilotGit(
+      'proposal-links',
+      { ...opts, sourceBranch: 'origin/develop' },
+      {
+        read: (args) => (args.includes('ls-remote') ? '' : 'true'),
+        exists: () => false,
+        pathExists: () => false,
+        mutate,
+      },
+    );
+    expect(res).toEqual({
+      branch: 'proposal-links',
+      worktreePath: join('/repo', '.claude/worktrees', 'proposal-links'),
+      pushed: false,
+    });
+    expect(mutate).toHaveBeenCalledWith(
+      gitArgs('/repo', [
+        'worktree',
+        'add',
+        join('/repo', '.claude/worktrees', 'proposal-links'),
+        '-b',
+        'proposal-links',
+        'origin/develop',
+      ]),
+      false,
+    );
+  });
+
+  it('reuses the worktree for a later ticket of the same run', () => {
+    const mutate = vi.fn();
+    const res = startAutopilotGit('proposal-links', opts, {
+      read: () => 'proposal-links\n',
+      pathExists: () => true,
+      mutate,
+    });
+    expect(res.branch).toBe('proposal-links');
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it('refuses a directory holding another branch rather than building on it', () => {
+    expect(() =>
+      startAutopilotGit('proposal-links', opts, {
+        read: () => 'someone-else\n',
+        pathExists: () => true,
+      }),
+    ).toThrow(/is on "someone-else"/);
+  });
+
+  it('refuses a slug already on the remote, which its force-push would overwrite', () => {
+    const mutate = vi.fn();
+    expect(() =>
+      startAutopilotGit('proposal-links', opts, {
+        read: (args) =>
+          args.includes('ls-remote') ? 'abc123\trefs/heads/proposal-links\n' : 'true',
+        exists: () => false,
+        pathExists: () => false,
+        mutate,
+      }),
+    ).toThrow(/already exists on origin/);
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it('re-attaches a local branch whose worktree was removed, keeping its commits', () => {
+    const mutate = vi.fn();
+    startAutopilotGit('proposal-links', opts, {
+      read: () => 'true',
+      exists: () => true,
+      pathExists: () => false,
+      mutate,
+    });
+    expect(mutate).toHaveBeenCalledWith(
+      gitArgs('/repo', [
+        'worktree',
+        'add',
+        join('/repo', '.claude/worktrees', 'proposal-links'),
+        'proposal-links',
+      ]),
+      false,
+    );
+  });
+
+  it('makes no git change in a dry run', () => {
+    const mutate = vi.fn();
+    startAutopilotGit(
+      'proposal-links',
+      { ...opts, dryRun: true },
+      {
+        read: (args) => (args.includes('ls-remote') ? '' : 'true'),
+        exists: () => false,
+        pathExists: () => false,
+        mutate,
+      },
+    );
+    expect(mutate).toHaveBeenCalledWith(expect.any(Array), true);
+  });
+
+  describe('against real git', () => {
+    let dir: string;
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: 'pipe' }).trim();
+
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), 'kodi-autopilot-'));
+      const remote = join(dir, 'origin.git');
+      execFileSync('git', ['init', '--quiet', '--bare', remote]);
+      execFileSync('git', ['clone', '--quiet', remote, join(dir, 'main')], { stdio: 'pipe' });
+      const main = join(dir, 'main');
+      git(main, 'config', 'user.email', 'test@example.com');
+      git(main, 'config', 'user.name', 'test');
+      git(main, 'checkout', '--quiet', '-b', 'develop');
+      writeFileSync(join(main, 'base.txt'), 'base\n');
+      git(main, 'add', '.');
+      git(main, 'commit', '--quiet', '-m', 'base');
+      git(main, 'push', '--quiet', '-u', 'origin', 'develop');
+    });
+    afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+    it('serves a whole run from one command: first ticket cuts, later tickets reuse', () => {
+      const root = join(dir, 'main');
+      const run = {
+        worktreesDir: '.claude/worktrees',
+        root,
+        dryRun: false,
+        sourceBranch: 'origin/develop',
+        reserved: ['origin/develop'],
+      };
+      const first = startAutopilotGit('proposal-links', run);
+      expect(existsSync(join(first.worktreePath!, 'base.txt'))).toBe(true);
+      expect(git(first.worktreePath!, 'branch', '--show-current')).toBe('proposal-links');
+      expect(git(root, 'branch', '--show-current')).toBe('develop');
+
+      writeFileSync(join(first.worktreePath!, 'one.txt'), 'one\n');
+      git(first.worktreePath!, 'add', '.');
+      git(first.worktreePath!, '-c', 'user.email=t@e', '-c', 'user.name=t', 'commit', '-qm', 'one');
+      const tip = git(first.worktreePath!, 'rev-parse', 'HEAD');
+
+      const later = startAutopilotGit('proposal-links', run);
+      expect(later.worktreePath).toBe(first.worktreePath);
+      expect(git(later.worktreePath!, 'rev-parse', 'HEAD')).toBe(tip);
+    });
+
+    it('refuses a slug that exists only on the remote', () => {
+      const root = join(dir, 'main');
+      git(root, 'push', '--quiet', 'origin', 'develop:taken');
+      expect(() =>
+        startAutopilotGit('taken', { worktreesDir: '.claude/worktrees', root, dryRun: false }),
+      ).toThrow(/already exists on origin/);
+      expect(existsSync(join(root, '.claude/worktrees', 'taken'))).toBe(false);
+    });
   });
 });

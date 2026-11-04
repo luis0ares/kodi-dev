@@ -300,6 +300,8 @@ export interface PrListRow {
   target: string;
   state: string;
   updated?: string;
+  /** Who opened it, when the provider says. */
+  author?: string;
 }
 
 /** Azure returns fully-qualified refs (`refs/heads/main`); GitHub returns names. */
@@ -354,6 +356,7 @@ export function parseAzurePrList(json: string): PrListRow[] {
     target: shortRef(r.targetRefName),
     state: String(r.status ?? ''),
     updated: optional(r.creationDate),
+    author: optional((r.createdBy as { displayName?: unknown } | null)?.displayName),
   }));
 }
 

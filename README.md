@@ -198,14 +198,15 @@ durable artifact, so a command can be re-run or resumed after a `/clear` or `/co
 The owner's words are copied verbatim into every artifact; nothing is paraphrased on the
 way from the prompt to the ticket.
 
-| Command                            | Writer               | Output                                                                               |
-| ---------------------------------- | -------------------- | ------------------------------------------------------------------------------------ |
-| `/kodi.discover`                   | `discover-writer`    | thin `CLAUDE.md`, rules, PRD 0000, founding ADRs; brownfield: as-built PRDs and ADRs |
-| `/kodi.plan <user story>`          | `plan-writer`        | `docs/prd/NNNN` (WHAT/WHY) + `docs/plan/NNNN` (caveman technical plan)               |
-| `/kodi.clarify <prd>`              | `plan-writer`        | answers written back, ambiguous sentences replaced                                   |
-| `/kodi.tasks <prd>`                | `tasks-writer`       | `docs/plan/NNNN.tasks.md` + one ticket per user story on the board                   |
-| `/kodi.build <ticket>`             | `build-orchestrator` | `ui-designer` → engineers with their own QA → PR to To Review                        |
-| `/kodi.security`, `/kodi.refactor` | main-loop            | audit reports / a tidied target                                                      |
+| Command                            | Writer               | Output                                                                                               |
+| ---------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------- |
+| `/kodi.discover`                   | `discover-writer`    | thin `CLAUDE.md`, rules, PRD 0000, founding ADRs; brownfield: as-built PRDs and ADRs                 |
+| `/kodi.plan <user story>`          | `plan-writer`        | `docs/prd/NNNN` (WHAT/WHY) + `docs/plan/NNNN` (caveman technical plan)                               |
+| `/kodi.clarify <prd>`              | `plan-writer`        | answers written back, ambiguous sentences replaced                                                   |
+| `/kodi.tasks <prd>`                | `tasks-writer`       | `docs/plan/NNNN.tasks.md` + one ticket per user story on the board                                   |
+| `/kodi.build <ticket>`             | `build-orchestrator` | `ui-designer` → engineers with their own QA → PR to To Review                                        |
+| `/kodi.autopilot`                  | `build-orchestrator` | a range of tickets, unattended: one worktree, one slug branch, one PR, a report in `docs/autopilot/` |
+| `/kodi.security`, `/kodi.refactor` | main-loop            | audit reports / a tidied target                                                                      |
 
 `/kodi.plan` is spec-kit's `specify` + `plan` in one pass: the story verbatim, at most
 five questions with a recommended answer each, then a short PRD with inline
@@ -261,6 +262,7 @@ kodi tickets start KODI-001 --yes             # → In progress, assigns you, cu
 kodi tickets start KODI-001 --push --yes      # …and publish it (`git push -u origin`) so a PR can open
 kodi tickets start KODI-001 --worktree --yes  # …or an isolated worktree instead
 kodi tickets start KODI-002 --no-branch --yes # bundling onto a branch another `start` already cut
+kodi tickets start KODI-003 --autopilot proposal-links --base origin/develop --yes  # one worktree a whole run shares
 kodi tickets hand-off KODI-001 --pr <url>     # end of slice: → To Review, record the PR
 kodi tickets iterations                       # list every iteration/sprint (azure/github only)
 kodi tickets list --iteration "Sprint 12"     # one specific iteration instead of the current one

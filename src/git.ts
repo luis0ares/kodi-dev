@@ -96,9 +96,16 @@ export function pushSliceBranch(
   mutate(gitArgs(opts.root, ['push', '-u', opts.remote ?? DEFAULT_REMOTE, branch]), opts.dryRun);
 }
 
+/** Where a branch's worktree lives; `/` is flattened so worktrees never nest. */
+function worktreePathFor(branch: string, opts: { root: string; worktreesDir: string }): string {
+  return join(opts.root, opts.worktreesDir, branch.replace(/\//g, '-'));
+}
+
 export interface StartGitOptions {
   /** Create an isolated worktree instead of checking out the branch in place. */
   worktree: boolean;
+  /** Cut this branch instead of {@link sliceBranchName}. */
+  branch?: string;
   /** Where worktrees are created, relative to `root` (`BoardConfig.worktreesDir`). */
   worktreesDir: string;
   /** Project root — the directory `.claude/kodi-dev.yaml` lives under. */
@@ -155,7 +162,7 @@ export function startSliceGit(
   // Before anything is previewed OR run: prove we are in a repository, so the
   // failure names the directory and the fix instead of git's bare exit 128.
   assertGitRepo(opts.root, read);
-  const branch = sliceBranchName(id);
+  const branch = opts.branch ?? sliceBranchName(id);
   // Only a brand-new branch has a base to pick — reusing an existing one keeps
   // whatever it already points at, so `sourceBranch` never applies there.
   const newBranchArgs = opts.sourceBranch ? [branch, opts.sourceBranch] : [branch];
@@ -179,7 +186,7 @@ export function startSliceGit(
   // itself stays namespaced (`slice/kodi-<id>`), but a worktree dir shaped like
   // the branch would nest one worktree per ticket under a shared `slice/`
   // folder, which is not what a flat --worktree layout wants.
-  const worktreePath = join(opts.root, opts.worktreesDir, branch.replace(/\//g, '-'));
+  const worktreePath = worktreePathFor(branch, opts);
   if (pathExists(worktreePath)) return { branch, worktreePath, pushed: push() };
   const already = exists(branch, read, opts.root);
   mutate(
@@ -192,4 +199,76 @@ export function startSliceGit(
     opts.dryRun,
   );
   return { branch, worktreePath, pushed: push() };
+}
+
+/** Names a branch, a worktree directory and a report file, so `/` cannot appear. */
+const AUTOPILOT_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/**
+ * Refuse a slug that cannot name a run's branch. A run commits to this branch and
+ * force-pushes it after every rebase, so a slug equal to an integration branch would
+ * do both to that branch.
+ */
+export function assertAutopilotSlug(
+  slug: string,
+  reserved: Array<string | undefined>,
+  remote = DEFAULT_REMOTE,
+): void {
+  if (!AUTOPILOT_SLUG_RE.test(slug)) {
+    throw new Error(
+      `--autopilot: "${slug}" is not a slug. Use lowercase kebab-case words, such as ` +
+        `proposal-links, with no "/" and no "slice/kodi-" prefix.`,
+    );
+  }
+  const branches = reserved
+    .filter((r): r is string => Boolean(r))
+    .map((r) => r.replace(`${remote}/`, ''));
+  if (branches.includes(slug)) {
+    throw new Error(
+      `--autopilot: "${slug}" is this project's integration branch. A run commits to and ` +
+        `force-pushes its branch, so it needs a name of its own.`,
+    );
+  }
+}
+
+export interface StartAutopilotOptions extends Omit<StartGitOptions, 'worktree' | 'branch'> {
+  /** Branches the slug must not name: the base, `sourceBranch`, `prTarget`. */
+  reserved?: Array<string | undefined>;
+}
+
+/**
+ * Cut, or reuse, the one worktree and branch an autopilot run builds every ticket on.
+ * The first ticket of a run creates them and each later ticket reuses them, so the
+ * same command serves the whole run. Unlike a slice branch, which is always this
+ * ticket's own, a slug is chosen by hand and can collide, so both collisions are
+ * refused rather than adopted.
+ */
+export function startAutopilotGit(
+  slug: string,
+  opts: StartAutopilotOptions,
+  deps: StartGitDeps = {},
+): StartGitResult {
+  const { reserved = [], ...rest } = opts;
+  assertAutopilotSlug(slug, reserved, opts.remote);
+  const read = deps.read ?? execRead;
+  const worktreePath = worktreePathFor(slug, opts);
+  assertGitRepo(opts.root, read);
+  if ((deps.pathExists ?? existsSync)(worktreePath)) {
+    const current = read(gitArgs(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+    if (current !== slug) {
+      throw new Error(
+        `--autopilot: ${worktreePath} is on "${current}", not "${slug}". Pick another slug, ` +
+          `or remove that worktree if it is stale.`,
+      );
+    }
+  } else if (
+    !(deps.exists ?? branchExists)(slug, read, opts.root) &&
+    remoteBranchExists(slug, opts.root, read, opts.remote) === true
+  ) {
+    throw new Error(
+      `--autopilot: branch "${slug}" already exists on ${opts.remote ?? DEFAULT_REMOTE}. ` +
+        `A run force-pushes its branch, which would overwrite it. Pick another slug.`,
+    );
+  }
+  return startSliceGit(slug, { ...rest, worktree: true, branch: slug }, deps);
 }

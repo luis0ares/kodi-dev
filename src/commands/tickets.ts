@@ -6,7 +6,7 @@ import {
   loadBoardConfig,
   type ProviderName,
 } from '../config.js';
-import { DEFAULT_REMOTE, startSliceGit } from '../git.js';
+import { DEFAULT_REMOTE, startAutopilotGit, startSliceGit } from '../git.js';
 import { LegacyDataError, type LegacyDataReport } from '../providers/local.js';
 import { resolveProvider } from '../providers/index.js';
 import type { TicketProvider, TicketRef } from '../providers/types.js';
@@ -289,7 +289,8 @@ export function registerTicketsCommand(program: Command) {
     .command('start <key>')
     .description(
       'Mark a ticket started (In progress, assigned to you on github/azure) and cut its ' +
-        'slice/kodi-<id> branch — or an isolated worktree with --worktree',
+        'slice/kodi-<id> branch — or an isolated worktree with --worktree, or the worktree ' +
+        'an autopilot run shares with --autopilot',
     )
     .option(
       '--worktree',
@@ -308,10 +309,29 @@ export function registerTicketsCommand(program: Command) {
       false,
     )
     .option('--remote <name>', 'remote --push targets', DEFAULT_REMOTE)
+    .option(
+      '--autopilot <slug>',
+      'cut or reuse one worktree on a branch named <slug>, shared by every ticket of an ' +
+        'autopilot run, instead of slice/kodi-<id> (implies --worktree)',
+    )
+    .option(
+      '--base <ref>',
+      'base a NEW branch on this ref instead of sourceBranch or the current branch',
+    )
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
       key = canonicalizeTicketKey(key);
+      for (const [flag, set] of [
+        ['--autopilot', o.autopilot],
+        ['--base', o.base],
+      ]) {
+        if (set && o.branch === false) {
+          process.stderr.write(`${flag} and --no-branch are mutually exclusive\n`);
+          process.exitCode = 1;
+          return;
+        }
+      }
       if (o.worktree && o.branch === false) {
         process.stderr.write('--worktree and --no-branch are mutually exclusive\n');
         process.exitCode = 1;
@@ -325,15 +345,20 @@ export function registerTicketsCommand(program: Command) {
       let git: { branch: string; worktreePath?: string; pushed: boolean } | undefined;
       if (o.branch !== false) {
         const cfg = loadBoardConfig(process.cwd());
-        git = startSliceGit(key, {
-          worktree: o.worktree,
+        const gitOpts = {
           worktreesDir: cfg.worktreesDir ?? DEFAULT_WORKTREES_DIR,
           root: findProjectRoot(process.cwd()),
           dryRun: !o.yes,
-          sourceBranch: cfg.sourceBranch,
+          sourceBranch: o.base ?? cfg.sourceBranch,
           push: o.push,
           remote: o.remote,
-        });
+        };
+        git = o.autopilot
+          ? startAutopilotGit(o.autopilot, {
+              ...gitOpts,
+              reserved: [o.base, cfg.sourceBranch, cfg.prTarget],
+            })
+          : startSliceGit(key, { ...gitOpts, worktree: o.worktree });
       }
       const t = await resolveProvider(process.cwd(), { yes: o.yes }).start(key, {
         branch: git?.branch,

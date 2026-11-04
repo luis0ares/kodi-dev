@@ -50,6 +50,14 @@ command to produce the artifacts. You coordinate through durable artifacts in
   \`frontend-engineer\` when UI renders, engineers own their QA, MET DIFFERENTLY
   comes to the human before the PR, close with a PR and hand-off. Never Done.
 
+- \`/kodi.autopilot [from <start> to <finish>]\` — Build a RANGE of tickets
+  unattended, one after the other, in one new worktree on one slug branch
+  (\`kodi tickets start … --autopilot <slug>\`). Ask the range, check it can be
+  built, ask a complement, take the go-ahead; that go-ahead is the human's word
+  to rule without them on a MET DIFFERENTLY, a design deviation and a scope
+  ambiguity for that run, each recorded in \`docs/autopilot/\`. Accepting an ADR,
+  a by-hand walk and a merge stay the human's. One PR, never Done.
+
 ## On-demand skills (never auto-run inside a command)
 
 - \`/kodi.security\` — audit a scope the HUMAN names (the diff, a path, a feature,
