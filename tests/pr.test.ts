@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertAzure,
+  assertSourcePublished,
   azureCreateArgs,
+  azureListArgs,
   azureUpdateArgs,
   azureWorkItemIds,
-  githubCreateArgs,
-  githubEditArgs,
+  parseAzurePrList,
+  renderPrList,
 } from '../src/commands/pr.js';
 import {
   assertWithinBodyLimit,
@@ -225,40 +228,6 @@ describe('pr command construction', () => {
     expect(args).not.toContain('--work-items');
   });
 
-  it('builds a github create command (markdown body-file, base/head, reviewers, repo)', () => {
-    const args = githubCreateArgs(
-      draft({ reviewers: ['octocat'] }),
-      '/tmp/body.md',
-      'feat/x',
-      'main',
-      'acme/app',
-    );
-    expect(args.slice(0, 5)).toEqual(['gh', 'pr', 'create', '--title', 'Add dataset import']);
-    expect(args).toContain('--body-file');
-    expect(args).toContain('/tmp/body.md');
-    expect(args.slice(-2)).toEqual(['--repo', 'acme/app']);
-    expect(args).toContain('--base');
-    expect(args).toContain('--head');
-    expect(args).toContain('--reviewer');
-    expect(args).toContain('octocat');
-  });
-
-  it('builds a github edit command (id, title, body-file, add-reviewer, repo)', () => {
-    const args = githubEditArgs(
-      '42',
-      draft({ reviewers: ['octocat'] }),
-      '/tmp/body.md',
-      'acme/app',
-    );
-    expect(args.slice(0, 4)).toEqual(['gh', 'pr', 'edit', '42']);
-    expect(args).toContain('--title');
-    expect(args).toContain('--body-file');
-    expect(args).toContain('/tmp/body.md');
-    expect(args).toContain('--add-reviewer');
-    expect(args).toContain('octocat');
-    expect(args.slice(-2)).toEqual(['--repo', 'acme/app']);
-  });
-
   it('builds an azure update command (identified by --id, no --repository)', () => {
     const args = azureUpdateArgs('42', draft(), '<p>x</p>');
     expect(args.slice(0, 5)).toEqual(['az', 'repos', 'pr', 'update', '--id']);
@@ -301,14 +270,125 @@ describe('pr command construction', () => {
   });
 
   it('omits --draft by default and adds it when requested', () => {
-    expect(githubCreateArgs(draft(), '/tmp/body.md', 'feat/x', 'main')).not.toContain('--draft');
-    expect(githubCreateArgs(draft(), '/tmp/body.md', 'feat/x', 'main', undefined, true)).toContain(
-      '--draft',
-    );
     expect(azureCreateArgs(draft(), '<p>x</p>', 'feat/x', 'main')).not.toContain('--draft');
     // az takes an explicit boolean value after --draft
     const az = azureCreateArgs(draft(), '<p>x</p>', 'feat/x', 'main', undefined, true);
     expect(az).toContain('--draft');
     expect(az[az.indexOf('--draft') + 1]).toBe('true');
+  });
+});
+
+describe('--testing e2e', () => {
+  it('accepts e2e as its own box rather than filing an E2E suite under integration', () => {
+    const md = renderPrMarkdown(draft({ testing: { e2e: true } }));
+    expect(md).toContain('- [x] End-to-end tests');
+    expect(md).toContain('- [ ] Integration tests');
+  });
+
+  it('still requires at least one testing box', () => {
+    const r = PrSchema.safeParse({
+      title: 'A valid title',
+      summary: 'x',
+      typeOfChange: { fix: true },
+      relatedIssues: ['N/A'],
+      testing: {},
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) expect(r.error.issues.some((i) => /e2e/.test(i.message))).toBe(true);
+  });
+});
+
+describe('assertSourcePublished', () => {
+  it('passes when the branch is on the remote', () => {
+    expect(() =>
+      assertSourcePublished('slice/kodi-2', '/repo', () => 'sha\trefs/heads/slice/kodi-2\n'),
+    ).not.toThrow();
+  });
+
+  it('names the push command instead of letting az report an unknown ref', () => {
+    const empty = () => '';
+    expect(() => assertSourcePublished('slice/kodi-2', '/repo', empty)).toThrow(
+      /does not exist on origin/,
+    );
+    expect(() => assertSourcePublished('slice/kodi-2', '/repo', empty)).toThrow(
+      /git push -u origin slice\/kodi-2/,
+    );
+  });
+
+  it('never blocks when the remote cannot be interrogated', () => {
+    expect(() =>
+      assertSourcePublished('slice/kodi-2', '/repo', () => {
+        throw new Error('offline');
+      }),
+    ).not.toThrow();
+  });
+});
+
+describe('pr list', () => {
+  it('asks azure for json, with the repository only when one is configured', () => {
+    expect(azureListArgs('Repo')).toEqual([
+      'az',
+      'repos',
+      'pr',
+      'list',
+      '--output',
+      'json',
+      '--repository',
+      'Repo',
+    ]);
+    expect(azureListArgs()).not.toContain('--repository');
+  });
+
+  it('normalizes an azure listing, shortening its fully-qualified refs', () => {
+    const rows = parseAzurePrList(
+      JSON.stringify([
+        {
+          pullRequestId: 42,
+          title: 'fix: thing',
+          sourceRefName: 'refs/heads/slice/kodi-4',
+          targetRefName: 'refs/heads/develop',
+          status: 'active',
+          creationDate: '2026-09-16T09:04:39Z',
+        },
+      ]),
+    );
+    expect(rows[0].source).toBe('slice/kodi-4');
+    expect(rows[0].target).toBe('develop');
+    expect(rows[0].id).toBe('42');
+  });
+
+  it('names who opened an azure PR, and stays silent when azure does not say', () => {
+    const rows = parseAzurePrList(
+      JSON.stringify([
+        { pullRequestId: 1, createdBy: { displayName: 'Ana' } },
+        { pullRequestId: 2 },
+      ]),
+    );
+    expect(rows.map((r) => r.author)).toEqual(['Ana', undefined]);
+  });
+
+  it('renders the target branch on every row', () => {
+    const out = renderPrList([
+      { id: '8', title: 'feat: slice 3', source: 'slice/kodi-3', target: 'develop', state: 'OPEN' },
+      { id: '10', title: 'fix: y', source: 'slice/kodi-4', target: 'main', state: 'OPEN' },
+    ]);
+    expect(out).toContain('slice/kodi-3 → develop');
+    expect(out).toContain('slice/kodi-4 → main');
+    // aligned columns: both rows start their branch cell at the same offset
+    const [a, b] = out.split('\n');
+    expect(a.indexOf('slice/kodi-3')).toBe(b.indexOf('slice/kodi-4'));
+  });
+
+  it('says so rather than printing nothing on an empty board', () => {
+    expect(renderPrList([])).toBe('No open pull requests.');
+    expect(parseAzurePrList('')).toEqual([]);
+  });
+});
+
+describe('assertAzure', () => {
+  it('passes for azure and refuses anything else, naming what it got', () => {
+    expect(() => assertAzure('azure')).not.toThrow();
+    expect(() => assertAzure('local')).toThrow(/need the azure provider, not "local"/);
+    expect(() => assertAzure('github')).toThrow(/need the azure provider, not "github"/);
   });
 });

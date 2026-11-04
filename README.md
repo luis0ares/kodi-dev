@@ -67,52 +67,21 @@ the skills `discover`, `oplan`, `oreplan`, `tickets`, `retickets`, `ticket-start
 
 kodi tracks work on a board and drives ticket status through it. Pick one at init:
 
-| Provider     | Where tickets live                                | Status is driven by                        |
-| ------------ | ------------------------------------------------- | ------------------------------------------ |
-| **`local`**  | one file per ticket under **`docs/tickets/`**     | a local status index — no external service |
-| **`github`** | repo **issues**, added to a **Projects v2** board | the board's single-select **Status** field |
-| **`azure`**  | Azure DevOps **work items** on a **basic board**  | the board columns                          |
+| Provider    | Where tickets live                               | Status is driven by                        |
+| ----------- | ------------------------------------------------ | ------------------------------------------ |
+| **`local`** | one file per ticket under **`docs/tickets/`**    | a local status index — no external service |
+| **`azure`** | Azure DevOps **work items** on a **basic board** | the board columns                          |
 
-Auth is inherited from your already-logged-in `gh` / `az` CLIs — kodi never stores
-credentials.
+Auth is inherited from your already-logged-in `az` CLI — kodi never stores credentials.
+
+A project still set to `provider: github` is refused with that message. Run `kodi init` to
+switch it.
 
 #### Local
 
 Nothing to authenticate. Tickets are plain files under `docs/tickets/`, so the whole
 backlog is visible in your repo and versioned with your code. Browse it visually with the
 **read-only board app** (see [The local board](#the-local-board)).
-
-#### GitHub Projects
-
-The `github` provider stores tickets as repo issues and drives their status through a
-**Projects v2** board's single-select **Status** field. Do this once:
-
-```bash
-gh auth login                                     # authenticate the gh CLI
-gh auth refresh -s project --hostname github.com  # grant the Projects scope (NOT in default auth)
-```
-
-`kodi init` discovers the rest for you:
-
-| You provide                                             | kodi discovers                                                              |
-| ------------------------------------------------------- | --------------------------------------------------------------------------- |
-| whether the board is owned by an **org** or a **user**  | the project **number** (pick from a list)                                   |
-| the **owner login** (user-owned defaults to your login) | the Status field's **columns** (map To Do / In Progress / To Review / Done) |
-| —                                                       | the **repository** (the current repo is offered first)                      |
-
-> [!NOTE]
-> GitHub's built-in board has only `Todo` / `In Progress` / `Done` — no "To Review". Map
-> To Review onto another option, or add an "In Review" column to the board.
-
-Interactive: `kodi init --provider github` and answer the prompts. Non-interactive:
-
-```bash
-kodi init --provider github \
-  --owner-type org --project-owner acme --project-number 5 \
-  --repository acme/app \
-  --todo-column "Todo" --in-progress-column "In Progress" \
-  --to-review-column "In Review" --done-column "Done"
-```
 
 #### Azure DevOps
 
@@ -130,20 +99,18 @@ editing the YAML.
 
 ### Set by `kodi init`
 
-| Field           | Meaning                                                                            | Set for           |
-| --------------- | ---------------------------------------------------------------------------------- | ----------------- |
-| `provider`      | Board provider: `local` \| `github` \| `azure`                                     | always            |
-| `prefix`        | Local ticket key prefix (default `KODI`)                                           | `local`           |
-| `organization`  | Azure DevOps org URL                                                               | `azure`           |
-| `project`       | Azure DevOps project name                                                          | `azure`           |
-| `team`          | Azure team that owns the board                                                     | `azure`           |
-| `board`         | Azure board name (e.g. `Issues`)                                                   | `azure`           |
-| `columnStates`  | Chosen column name → work-item state, discovered from the real board               | `azure`           |
-| `repository`    | Repo for PRs/issues (Azure: bare name; GitHub: `owner/repo`)                       | `azure`, `github` |
-| `projectOwner`  | GitHub Projects v2 owner login (org or user)                                       | `github`          |
-| `projectNumber` | GitHub Projects v2 board number                                                    | `github`          |
-| `columns`       | Status → column map (`todo`/`inProgress`/`toReview`/`done`)                        | `github`, `azure` |
-| `prTarget`      | Default target branch for `kodi pr create`, chosen from the remote's real branches | `github`, `azure` |
+| Field          | Meaning                                                                            | Set for |
+| -------------- | ---------------------------------------------------------------------------------- | ------- |
+| `provider`     | Board provider: `local` \| `azure`                                                 | always  |
+| `prefix`       | Local ticket key prefix (default `KODI`)                                           | `local` |
+| `organization` | Azure DevOps org URL                                                               | `azure` |
+| `project`      | Azure DevOps project name                                                          | `azure` |
+| `team`         | Azure team that owns the board                                                     | `azure` |
+| `board`        | Azure board name (e.g. `Issues`)                                                   | `azure` |
+| `columnStates` | Chosen column name → work-item state, discovered from the real board               | `azure` |
+| `repository`   | Repo for PRs (bare name)                                                           | `azure` |
+| `columns`      | Status → column map (`todo`/`inProgress`/`toReview`/`done`)                        | `azure` |
+| `prTarget`     | Default target branch for `kodi pr create`, chosen from the remote's real branches | `azure` |
 
 ### Additional configuration (not set by `kodi init`)
 
@@ -190,14 +157,15 @@ durable artifact, so a command can be re-run or resumed after a `/clear` or `/co
 The owner's words are copied verbatim into every artifact; nothing is paraphrased on the
 way from the prompt to the ticket.
 
-| Command                     | Writer                   | Output                                                                  |
-| --------------------------- | ------------------------ | ----------------------------------------------------------------------- |
-| `/kodi.discover`            | `discover-writer`        | thin `CLAUDE.md`, rules, PRD 0000, founding ADRs; brownfield: as-built PRDs and ADRs |
-| `/kodi.plan <user story>`   | `plan-writer`            | `docs/prd/NNNN` (WHAT/WHY) + `docs/plan/NNNN` (caveman technical plan) |
-| `/kodi.clarify <prd>`       | `plan-writer`            | answers written back, ambiguous sentences replaced                      |
-| `/kodi.tasks <prd>`         | `tasks-writer`           | `docs/plan/NNNN.tasks.md` + one ticket per user story on the board      |
-| `/kodi.build <ticket>`      | `build-orchestrator`     | `ui-designer` → engineers with their own QA → PR to To Review           |
-| `/kodi.security`, `/kodi.refactor` | main-loop         | audit reports / a tidied target                                         |
+| Command                            | Writer               | Output                                                                                               |
+| ---------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------- |
+| `/kodi.discover`                   | `discover-writer`    | thin `CLAUDE.md`, rules, PRD 0000, founding ADRs; brownfield: as-built PRDs and ADRs                 |
+| `/kodi.plan <user story>`          | `plan-writer`        | `docs/prd/NNNN` (WHAT/WHY) + `docs/plan/NNNN` (caveman technical plan)                               |
+| `/kodi.clarify <prd>`              | `plan-writer`        | answers written back, ambiguous sentences replaced                                                   |
+| `/kodi.tasks <prd>`                | `tasks-writer`       | `docs/plan/NNNN.tasks.md` + one ticket per user story on the board                                   |
+| `/kodi.build <ticket>`             | `build-orchestrator` | `ui-designer` → engineers with their own QA → PR to To Review                                        |
+| `/kodi.autopilot`                  | `build-orchestrator` | a range of tickets, unattended: one worktree, one slug branch, one PR, a report in `docs/autopilot/` |
+| `/kodi.security`, `/kodi.refactor` | main-loop            | audit reports / a tidied target                                                                      |
 
 `/kodi.plan` is spec-kit's `specify` + `plan` in one pass: the story verbatim, at most
 five questions with a recommended answer each, then a short PRD with inline
@@ -218,7 +186,7 @@ inherits the session's model.
 
 ## CLI reference
 
-All board/PR mutations proxy `gh` / `az` and are **dry-run unless you pass `--yes`**. The
+All board/PR mutations proxy `az` and are **dry-run unless you pass `--yes`**. The
 provider is read from `.claude/kodi-dev.yaml`.
 
 Every command also checks — at most once a day, capped at 1.5s, never on the critical
@@ -244,15 +212,17 @@ kodi tickets create -t "Title" -s "Summary" --ac "criterion" --dep KODI-001
 kodi tickets list                    # open tickets (Done is not fetched)
 kodi tickets list --all              # …including the Done column
 kodi tickets list-ready              # dependency-aware readiness (+ the blocked set)
-kodi tickets get KODI-001            # any ticket, Done or not
+kodi tickets get KODI-001            # any ticket, Done or not (alias: `tickets show`)
 kodi tickets deps KODI-001 --add KODI-002   # read or declare dependencies
 kodi tickets set-status KODI-001 Done
 kodi tickets amend KODI-001 --file patch.yaml
 kodi tickets start KODI-001 --yes             # → In progress, assigns you, cuts slice/kodi-KODI-001
+kodi tickets start KODI-001 --push --yes      # …and publish it (`git push -u origin`) so a PR can open
 kodi tickets start KODI-001 --worktree --yes  # …or an isolated worktree instead
 kodi tickets start KODI-002 --no-branch --yes # bundling onto a branch another `start` already cut
-kodi tickets hand-off KODI-001 --pr <url>     # end of slice: → To Review, link the PR
-kodi tickets iterations                       # list every iteration/sprint (azure/github only)
+kodi tickets start KODI-003 --autopilot proposal-links --base origin/develop --yes  # one worktree a whole run shares
+kodi tickets hand-off KODI-001 --pr <url>     # end of slice: → To Review, record the PR
+kodi tickets iterations                       # list every iteration/sprint (azure only)
 kodi tickets list --iteration "Sprint 12"     # one specific iteration instead of the current one
 kodi tickets list --all-iterations            # disable iteration filtering — every ticket, every sprint
 kodi tickets create ... --iteration "Sprint 12" --yes   # assign to an iteration on create
@@ -268,6 +238,19 @@ branch as a separate worktree instead of switching the current checkout — unde
 `--no-branch` skips branch/worktree creation entirely, for bundling several tickets onto
 one branch (`--worktree` and `--no-branch` together are rejected).
 
+The branch `start` cuts is **local only** unless you pass `--push`, which publishes it with
+upstream tracking (`git push -u origin <branch>`, or `--remote <name>` for another remote).
+A PR's head branch has to exist on the remote before `kodi pr create` can open against it,
+so without `--push` there is a manual `git push` between `start` and `pr create`; `start`
+says so in its output, and `pr create` refuses with the exact push command rather than
+surfacing the provider's "unknown ref" error.
+
+Every git command kodi runs is anchored at the **project root** — the directory holding
+`.claude/kodi-dev.yaml` — so `start` works from any subdirectory of a configured project.
+If that root is not inside a git repository, `start` says exactly that and names the
+directory, on the dry run as well as the real one, instead of failing with git's bare
+`exit 128`.
+
 Every ticket is validated against a strict template before it is written or sent to the
 provider.
 
@@ -275,15 +258,13 @@ provider.
 that reads a listing renders it — `tree` drops Done nodes, and a dependency that has left
 the listing is treated as satisfied rather than re-fetched to prove it. So `list`, `tree`
 and `list-ready` pull open work only: on Azure the Done filter is applied inside the WIQL,
-so finished descriptions never cross the wire; on GitHub, Done items are dropped before
-their bodies are read, which is where the per-issue API calls (and the narrower rate
-limit) bite. Done tickets are fetched on demand with `tickets list --all`, or individually
+so finished descriptions never cross the wire. Done tickets are fetched on demand with `tickets list --all`, or individually
 with `tickets get <key>`, which never filters. The trade-off: a dependency key that
 matches nothing now reads as satisfied instead of blocking forever — `create` and `amend`
 warn about unknown keys at write time, confirming each one with a targeted lookup so a
 dependency on finished work stays silent.
 
-**Iterations/sprints — `azure` and `github` only** (`local` has no such concept and
+**Iterations/sprints — `azure` only** (`local` has no such concept and
 rejects `--iteration`/`iterations` with a clear error). `list` defaults to the **current**
 iteration plus anything not yet scheduled into any sprint; `--iteration <name>` views one
 specific (e.g. past) iteration instead, and `--all-iterations` disables the filter
@@ -291,6 +272,11 @@ entirely. `kodi tickets iterations` lists every iteration with its dates and mar
 current one. Assigning a ticket to an iteration is a separate, board-native step — via
 `--iteration` on `create`/`amend` — never part of the portable ticket record itself, the
 same way `status` is always trusted from the board rather than a stored copy.
+
+**PR links on a ticket are kodi bookkeeping.** `tickets link-pr` and `hand-off --pr` write
+a `**PR:** <ref>` line into the ticket's body and nothing else. The work-item link itself
+comes from `--issue` on `kodi pr create`. `hand-off` is idempotent: re-running it on a ticket
+already in **To review** leaves the status alone and just (re-)writes the line.
 
 ### The local board
 
@@ -309,16 +295,25 @@ not to edit it. Mutations always go through the CLI.
 ### Pull requests
 
 Every PR follows a **strict template validated in code** (summary, type of change,
-included changes → features/fixes/improvements, related issues / work items, testing,
-and a checklist). Every section is always rendered — only notes is optional — so the
-created PR never collapses to a bare summary. Bodies are portable and capped so no
-provider truncates them.
+included changes → features/fixes/improvements, related issues / work items, testing —
+`unit` / `integration` / `e2e` / `manual` / `na` — and a checklist). Every section is always
+rendered — only notes is optional — so the created PR never collapses to a bare summary.
+Bodies are portable and capped so no provider truncates them.
 
 ```bash
 kodi pr create --source feat/x --target main -t "Title" -s "Summary" --yes
-kodi pr list
+kodi pr create --source slice/kodi-3 --issue 3 --issue 4 ... --yes   # → links work items 3 and 4
+kodi pr list                 # id, state, source → target, title
+kodi pr list --json          # machine-readable, same rows
 kodi pr abandon <id>
 ```
+
+`pr list` shows each PR's **base** branch, not just its head — when `prTarget` is overridden
+per-PR there is otherwise no way to confirm through kodi what a PR actually targets — and
+`--json` gives the same rows machine-readably, matching the `tickets` commands.
+
+`--issue` links a work item when it reads `123`, `#123` or `AB#123`, through
+`az repos pr create --work-items`; anything else is kept as plain text in the body.
 
 ### Skill-packs
 

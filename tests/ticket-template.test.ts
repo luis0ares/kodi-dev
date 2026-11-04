@@ -45,8 +45,8 @@ describe('ticket template', () => {
     expect(canonicalizeTicketKey('KODI-1000')).toBe('KODI-1000');
   });
 
-  it('leaves bare numeric ids and free-form refs untouched (github/azure safe)', () => {
-    expect(canonicalizeTicketKey('42')).toBe('42'); // github issue / azure work-item id
+  it('leaves bare numeric ids and free-form refs untouched (azure safe)', () => {
+    expect(canonicalizeTicketKey('42')).toBe('42'); // azure work-item id
     expect(canonicalizeTicketKey('#7')).toBe('#7');
     expect(canonicalizeTicketKey('N/A')).toBe('N/A');
     expect(canonicalizeTicketKey('see AUTH board')).toBe('see AUTH board');

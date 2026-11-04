@@ -12,7 +12,7 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { stringify as stringifyYaml } from 'yaml';
-import { stateFilePath, type BoardConfig } from '../config.js';
+import { PROVIDERS, stateFilePath, type BoardConfig, type ProviderName } from '../config.js';
 import { DEFAULT_COLUMNS } from '../providers/azure.js';
 import {
   getProjectInfo,
@@ -26,15 +26,6 @@ import {
   type BoardColumn,
   type Runner,
 } from '../providers/azure-discovery.js';
-import {
-  detectRepo,
-  hasProjectWriteScope,
-  listBranches as listGithubBranches,
-  listProjects as listGithubProjects,
-  listRepos,
-  listStatusField,
-  resolveViewerLogin,
-} from '../providers/github-discovery.js';
 import { readlinePrompter, type Prompter } from '../prompt.js';
 
 const HOOK_COMMAND = 'kodi hook session-start';
@@ -79,14 +70,11 @@ export function mergeSessionStartHook(settings: Record<string, any>): boolean {
 }
 
 /**
- * The gh/az commands that touch pull requests and board tasks. Each is denied
- * BOTH directly and via the rtk proxy (which rewrites `gh …` → `rtk gh …`), so the
- * proxy can't be used to slip a board/PR mutation past the direct deny.
+ * The az commands that touch pull requests and board tasks. Each is denied BOTH
+ * directly and via the rtk proxy (which rewrites `az …` → `rtk az …`), so the proxy
+ * can't be used to slip a board/PR mutation past the direct deny.
  */
 const BOARD_CLI_COMMANDS = [
-  'gh pr', // GitHub pull requests
-  'gh issue', // GitHub issues (board tasks)
-  'gh project', // GitHub Projects (boards)
   'az repos pr', // Azure DevOps pull requests
   'az boards', // Azure DevOps boards (work items / tasks)
 ];
@@ -98,8 +86,8 @@ function denyDirectAndRtk(cmd: string): string[] {
 
 /**
  * Locked-down default permissions written into a new project's settings.json.
- * kodi IS the sanctioned path for the agent: it proxies gh/az with a validated
- * template, so the agent drives the board THROUGH kodi while the raw gh/az board
+ * kodi IS the sanctioned path for the agent: it proxies az with a validated
+ * template, so the agent drives the board THROUGH kodi while the raw az board
  * and PR commands are denied (forcing everything through the validating layer).
  * The one kodi command denied is `kodi init` — a one-time human setup step that
  * would clobber this very config if an agent re-ran it. The rtk-proxied form of
@@ -110,6 +98,11 @@ export const PERMISSION_DENY = [
   ...BOARD_CLI_COMMANDS.flatMap(denyDirectAndRtk),
   ...denyDirectAndRtk('kodi init'), // the one-time human setup command, direct and via rtk
 ];
+/**
+ * Rules earlier kits denied. Dropped on re-init: kodi no longer drives a GitHub board,
+ * so left in place they would stop an agent using `gh` on a project hosted there.
+ */
+export const RETIRED_DENY = ['gh pr', 'gh issue', 'gh project'].flatMap(denyDirectAndRtk);
 export const PERMISSION_ALLOW = [
   'Read(.claude/agents/**)', // read the installed agents
   'Read(.claude/skills/**)', // read the installed skills
@@ -137,7 +130,10 @@ function applyRules(existing: unknown, defaults: string[]): string[] {
  */
 export function mergePermissions(settings: Record<string, any>): boolean {
   const perms = (settings.permissions ??= {});
-  const deny = applyRules(perms.deny, PERMISSION_DENY);
+  const kept = (Array.isArray(perms.deny) ? (perms.deny as string[]) : []).filter(
+    (r) => !RETIRED_DENY.includes(r),
+  );
+  const deny = applyRules(kept, PERMISSION_DENY);
   const allow = applyRules(perms.allow, PERMISSION_ALLOW);
   const changed =
     JSON.stringify(perms.deny ?? []) !== JSON.stringify(deny) ||
@@ -296,10 +292,10 @@ export interface InstallOptions {
   assetsDir?: string;
   /**
    * The configured board provider. `docs/tickets/` is the LOCAL provider's ticket
-   * store; a remote board (github/azure) keeps its tickets on the remote, so we do
-   * NOT scaffold `docs/tickets/` for those providers. Defaults to `local`.
+   * store; the azure board keeps its tickets on the remote, so we do NOT scaffold
+   * `docs/tickets/` for it. Defaults to `local`.
    */
-  provider?: 'local' | 'github' | 'azure';
+  provider?: ProviderName;
 }
 
 /**
@@ -343,9 +339,8 @@ export function installHarness(root: string, opts: InstallOptions = {}): string[
     ...pruneRetiredAssets(root),
   );
 
-  // `tickets` is the LOCAL provider's on-disk ticket store — remote boards
-  // (github/azure) keep their tickets on the remote, so it is scaffolded ONLY for
-  // the local provider. The rest of the docs scaffold is provider-independent.
+  // `tickets` is the LOCAL provider's on-disk ticket store — the azure board keeps
+  // its tickets on the remote, so it is scaffolded ONLY for the local provider. The rest of the docs scaffold is provider-independent.
   const provider = opts.provider ?? 'local';
   const docsSubs = ['prd', 'adr', 'diagrams', 'plan', 'security'];
   if (provider === 'local') docsSubs.push('tickets');
@@ -360,7 +355,7 @@ export function installHarness(root: string, opts: InstallOptions = {}): string[
 export class InitAbort extends Error {}
 
 export interface WizardOptions {
-  provider?: 'local' | 'github' | 'azure';
+  provider?: string;
   prefix?: string;
   /** Non-interactive azure values (skip the matching prompt when provided). */
   org?: string;
@@ -374,10 +369,6 @@ export interface WizardOptions {
   repository?: string;
   /** Non-interactive default PR target branch (skips the branch prompt). */
   prTarget?: string;
-  /** Non-interactive github values. */
-  ownerType?: string;
-  projectOwner?: string;
-  projectNumber?: number;
   runner?: Runner;
 }
 
@@ -419,17 +410,16 @@ export async function configureBoard(
   opts: WizardOptions = {},
 ): Promise<BoardConfig> {
   const provider =
-    opts.provider ??
-    ((await prompter.select('Which board provider?', ['local', 'github', 'azure'])) as
-      'local' | 'github' | 'azure');
+    opts.provider ?? (await prompter.select('Which board provider?', [...PROVIDERS]));
+  // Anything past the local branch below runs the azure wizard, so an unknown name
+  // has to stop here rather than be configured as azure.
+  if (!(PROVIDERS as readonly string[]).includes(provider)) {
+    throw new InitAbort(`provider "${provider}" is not supported: use ${PROVIDERS.join(' or ')}.`);
+  }
 
   if (provider === 'local') {
     const prefix = opts.prefix ?? (await prompter.input('Ticket key prefix', 'KODI'));
     return { provider: 'local', prefix: prefix || 'KODI' };
-  }
-
-  if (provider === 'github') {
-    return configureGithub(prompter, opts);
   }
 
   // Azure DevOps — tickets are always created as Issue work-items.
@@ -584,143 +574,6 @@ export async function configureBoard(
   };
 }
 
-/**
- * Interactive GitHub Projects v2 configuration. Issues live in a repo; status is
- * driven by a board's single-select Status field. Discovery proxies `gh`.
- */
-async function configureGithub(prompter: Prompter, opts: WizardOptions): Promise<BoardConfig> {
-  // Preflight the WRITE scope up front: discovery below only needs read:project,
-  // so a read-only token would sail through init and then fail at the first
-  // `kodi tickets create` (when the issue is added to the board). Only block when
-  // we can positively confirm the `project` scope is absent (null = unknown).
-  if (hasProjectWriteScope(opts.runner) === false) {
-    throw new InitAbort(
-      'your gh token can read Projects but not write to them (has read:project, missing project). ' +
-        'Run `gh auth refresh -s project --hostname github.com`, then re-run `kodi init`.',
-    );
-  }
-
-  // Owner: user-owned defaults to the authenticated login; org-owned is prompted.
-  let owner = opts.projectOwner;
-  if (!owner) {
-    const ownerType =
-      opts.ownerType ??
-      (await prompter.select('Is the board owned by an organization or a user?', [
-        'organization',
-        'user',
-      ]));
-    if (ownerType === 'user') {
-      let login = '';
-      try {
-        login = resolveViewerLogin(opts.runner);
-      } catch {
-        /* fall through to a prompt */
-      }
-      owner = (await prompter.input('GitHub user login (board owner)', login)) || login;
-    } else {
-      owner = await prompter.input('GitHub organization login (board owner)');
-    }
-  }
-  if (!owner) throw new InitAbort('missing: project owner.');
-
-  // First `gh project` call — also the auth/scope preflight. A failure here is
-  // usually a missing login or the Projects scope, so say exactly how to fix it.
-  let projects;
-  try {
-    projects = listGithubProjects(owner, opts.runner);
-  } catch (e) {
-    throw new InitAbort(
-      `could not list projects for ${owner}. Is \`gh\` installed and logged in (gh auth login), and does your ` +
-        `token have the Projects scope (gh auth refresh -s project --hostname github.com)? ${e instanceof Error ? e.message : ''}`,
-    );
-  }
-  if (projects.length === 0) throw new InitAbort(`no Projects v2 boards found for owner ${owner}.`);
-
-  let number = opts.projectNumber;
-  if (number != null) {
-    if (!projects.some((p) => p.number === number)) {
-      throw new InitAbort(
-        `project #${number} not found for ${owner} (found: ${projects.map((p) => `#${p.number} ${p.title}`).join(', ')}).`,
-      );
-    }
-  } else {
-    const choice = await prompter.select(
-      'Select a project',
-      projects.map((p) => `#${p.number} ${p.title}`),
-    );
-    number = Number(choice.match(/#(\d+)/)![1]);
-  }
-
-  const statusField = listStatusField(owner, number, opts.runner);
-  if (!statusField) {
-    throw new InitAbort(
-      `project #${number} has no single-select "Status" field. Add a Status field to the board (every built-in ` +
-        `board template has one), then re-run \`kodi init\`.`,
-    );
-  }
-  const options = statusField.options.map((o) => o.name);
-  if (options.length === 0)
-    throw new InitAbort(`the Status field on project #${number} has no options.`);
-
-  // GitHub Status options carry no meta-categories, so the user picks each bucket
-  // from the flat option list (auto-select when there's a single option).
-  const pick = async (flag: string | undefined, message: string): Promise<string> => {
-    if (flag) return flag;
-    return options.length === 1 ? options[0] : prompter.select(message, options);
-  };
-  const columns = {
-    todo: await pick(opts.todoColumn, 'To Do column (where new issues are created)'),
-    inProgress: await pick(opts.inProgressColumn, 'In Progress column'),
-    toReview: await pick(opts.toReviewColumn, 'To Review column'),
-    done: await pick(opts.doneColumn, 'Done column'),
-  };
-
-  let repository = opts.repository;
-  if (!repository) {
-    let detected = '';
-    try {
-      detected = detectRepo(opts.runner);
-    } catch {
-      /* not in a gh-recognized repo */
-    }
-    let repos: string[] = [];
-    try {
-      repos = listRepos(owner, opts.runner);
-    } catch {
-      /* fall back to free-text below */
-    }
-    if (repos.length > 0) {
-      // Surface the current repo first so it's the default-highlighted choice.
-      if (detected && repos.includes(detected))
-        repos = [detected, ...repos.filter((r) => r !== detected)];
-      repository = await prompter.select('Repository for issues', repos);
-    } else {
-      repository =
-        (await prompter.input('Repository for issues (owner/repo)', detected)) || detected;
-    }
-  }
-  if (!repository) throw new InitAbort('missing: repository (owner/repo).');
-
-  // After the board is mapped, offer the repo's real branches as the default PR target.
-  let ghBranches: string[] = [];
-  try {
-    ghBranches = listGithubBranches(repository, opts.runner);
-  } catch {
-    /* branch discovery unavailable → pickPrTarget falls back to free-text */
-  }
-  const prTarget = await pickPrTarget(prompter, ghBranches, opts.prTarget);
-
-  return {
-    provider: 'github',
-    prefix: 'KODI',
-    repository,
-    projectOwner: owner,
-    projectNumber: number,
-    columns,
-    prTarget,
-  };
-}
-
 /** Persist the board config to the project's `.claude/kodi-dev.yaml`. */
 export function writeState(root: string, config: BoardConfig): string {
   const path = stateFilePath(root);
@@ -734,26 +587,23 @@ export function registerInitCommand(program: Command) {
     .command('init')
     .description('Install the kodi harness and configure the board (interactive)')
     .option('-d, --dir <path>', 'target project directory', process.cwd())
-    .option('--provider <local|github|azure>', 'skip the provider prompt')
+    .option('--provider <local|azure>', 'skip the provider prompt')
     .option('--prefix <prefix>', 'local ticket key prefix (default KODI)')
     .option('--org <url>', 'azure org URL (non-interactive)')
     .option('--project <name>', 'azure project (non-interactive)')
     .option('--team <name>', 'azure team that owns the board (non-interactive)')
     .option('--board <name>', 'azure board name (non-interactive, default Issues)')
-    .option('--owner-type <org|user>', 'github board owner type (non-interactive)')
-    .option('--project-owner <login>', 'github Projects owner login (org or user)')
-    .option('--project-number <n>', 'github Projects board number', (v) => Number(v))
     .option('--todo-column <name>', 'To Do column (non-interactive)')
     .option('--in-progress-column <name>', 'In Progress column')
     .option('--to-review-column <name>', 'To Review column')
     .option('--done-column <name>', 'Done column')
-    .option('--repository <name>', 'repository for PRs (azure: name; github: owner/repo)')
+    .option('--repository <name>', 'repository for PRs (azure: name)')
     .option('--pr-target <branch>', 'default target branch for pull requests (non-interactive)')
     .action(async (o) => {
       const root = String(o.dir);
 
       // Non-TTY + a remote provider without a way to prompt would hang — guard it.
-      let provider = o.provider as 'local' | 'github' | 'azure' | undefined;
+      let provider = o.provider as string | undefined;
       if (!provider && !process.stdin.isTTY) provider = 'local';
 
       const prompter = readlinePrompter();
@@ -767,9 +617,6 @@ export function registerInitCommand(program: Command) {
           project: o.project,
           team: o.team,
           board: o.board,
-          ownerType: o.ownerType,
-          projectOwner: o.projectOwner,
-          projectNumber: o.projectNumber,
           todoColumn: o.todoColumn,
           inProgressColumn: o.inProgressColumn,
           toReviewColumn: o.toReviewColumn,

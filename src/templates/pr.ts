@@ -3,7 +3,7 @@ import { mdToHtml } from '../html.js';
 
 /**
  * The PR template IS this schema — same philosophy as the ticket template. A
- * draft is validated before anything is rendered or sent to gh/az.
+ * draft is validated before anything is rendered or sent to az.
  *
  * Unlike the ticket body, the PR body has a FIXED shape: every top-level section
  * (Summary, Type of Change, Included Changes, Related Issues / Work Items,
@@ -37,12 +37,16 @@ const TestingSchema = z
   .object({
     unit: z.boolean().default(false),
     integration: z.boolean().default(false),
+    /** A real-stack end-to-end suite (Playwright/Cypress/…). Distinct from
+     * `integration`, which is where such a run used to be recorded for want of a
+     * better box — an E2E suite is neither a component-integration test nor manual. */
+    e2e: z.boolean().default(false),
     manual: z.boolean().default(false),
     na: z.boolean().default(false),
   })
   .default({})
   .refine(anyChecked, {
-    message: 'Testing: select at least one (unit/integration/manual/na)',
+    message: 'Testing: select at least one (unit/integration/e2e/manual/na)',
   });
 
 export const PrSchema = z.object({
@@ -68,7 +72,7 @@ export type PrInput = z.input<typeof PrSchema>;
 export type Pr = z.infer<typeof PrSchema>;
 
 /**
- * Both GitHub and Azure DevOps turn "#" immediately followed by a number into a
+ * Azure DevOps turns "#" immediately followed by a number into a
  * link to an internal resource (issue / work item / PR). Nothing in our free-text
  * fields intends that, so break the "#<number>" adjacency with a zero-width space:
  * it renders as "#1010" but no longer autolinks. A ZWSP is used rather than a
@@ -106,7 +110,7 @@ function checkboxes(items: [label: string, on: boolean][]): string[] {
   return items.map(([label, on]) => `- [${on ? 'x' : ' '}] ${label}`);
 }
 
-/** Render the PR body as Markdown (for gh --body-file). Every section except
+/** Render the PR body as Markdown (what the body limit is measured on). Every section except
  * Notes is always present, matching the repository PR template. */
 export function renderPrMarkdown(pr: Pr): string {
   const s = neutralizeAutolinks;
@@ -138,6 +142,7 @@ export function renderPrMarkdown(pr: Pr): string {
     ...checkboxes([
       ['Unit tests', pr.testing.unit],
       ['Integration tests', pr.testing.integration],
+      ['End-to-end tests', pr.testing.e2e],
       ['Manual testing', pr.testing.manual],
       ['N/A', pr.testing.na],
     ]),

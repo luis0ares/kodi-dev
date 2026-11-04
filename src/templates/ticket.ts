@@ -65,7 +65,7 @@ export const KEY_NUM_WIDTH = 3;
  * key or the `<key>` argument of a lookup command (get / set-status / start / …).
  * Only values shaped like a prefixed key (`<PREFIX>-<digits>`) are touched: the
  * prefix is upper-cased and the number zero-padded to {@link KEY_NUM_WIDTH}. Bare
- * numeric ids (GitHub issue / Azure work-item numbers) and any other free-form
+ * numeric ids (Azure work-item numbers) and any other free-form
  * text are returned trimmed but otherwise unchanged, so this is safe on every
  * provider.
  */

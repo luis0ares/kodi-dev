@@ -1,6 +1,5 @@
 import { loadBoardConfig } from '../config.js';
 import { AzureTicketProvider } from './azure.js';
-import { GithubTicketProvider } from './github.js';
 import { LocalTicketProvider } from './local.js';
 import type { TicketProvider } from './types.js';
 
@@ -17,17 +16,6 @@ export interface ResolveOptions {
 export function resolveProvider(cwd = process.cwd(), opts: ResolveOptions = {}): TicketProvider {
   const cfg = loadBoardConfig(cwd);
   switch (cfg.provider) {
-    case 'local':
-      return new LocalTicketProvider(cfg.prefix, cwd);
-    case 'github':
-      return new GithubTicketProvider({
-        repo: cfg.repository,
-        owner: cfg.projectOwner ?? '',
-        number: cfg.projectNumber ?? 0,
-        columns: cfg.columns,
-        dryRun: !opts.yes,
-        cwd,
-      });
     case 'azure':
       return new AzureTicketProvider({
         organization: cfg.organization,
@@ -38,7 +26,7 @@ export function resolveProvider(cwd = process.cwd(), opts: ResolveOptions = {}):
         dryRun: !opts.yes,
         cwd,
       });
-    default:
+    case 'local':
       return new LocalTicketProvider(cfg.prefix, cwd);
   }
 }

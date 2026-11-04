@@ -31,7 +31,7 @@ a sentence you write.
 
 ```
 MODE: greenfield | brownfield
-Owner: <name>   Date: <YYYY-MM-DD>   Provider: local | github | azure
+Owner: <name>   Date: <YYYY-MM-DD>   Provider: local | azure
 Human's answers (verbatim, by topic): problem, users, how they work today,
   constraints, how the team works, destination, stack choices (greenfield)
 Investigator map: <pasted, brownfield only>

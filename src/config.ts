@@ -4,13 +4,13 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { slugForStatus } from './providers/status-index.js';
 import type { TicketStatus } from './templates/ticket.js';
 
-export type ProviderName = 'local' | 'github' | 'azure';
+export const PROVIDERS = ['local', 'azure'] as const;
+export type ProviderName = (typeof PROVIDERS)[number];
 
 /**
- * The board column mapping — a display column name per logical status. For Azure
- * these are the real BOARD COLUMNS the user sees (which may outnumber the
- * work-item states, since multiple columns can share one state); for GitHub they
- * are the Projects Status options. Discovered/confirmed by `kodi init`.
+ * The board column mapping — a display column name per logical status: the real
+ * Azure BOARD COLUMNS the user sees (which may outnumber the work-item states,
+ * since multiple columns can share one state). Discovered/confirmed by `kodi init`.
  */
 export interface ColumnMap {
   /** Column a new issue lands in (e.g. "To Do"). */
@@ -39,18 +39,14 @@ export interface BoardConfig {
    * absent here maps to itself (boards where column name == state name).
    */
   columnStates?: Record<string, string>;
-  /** Repository for PRs (Azure: bare name; GitHub: `owner/repo`, also where issues are created). */
+  /** Repository for PRs (bare name). */
   repository?: string;
-  /** GitHub Projects v2 owner login (org or user) that owns the board. */
-  projectOwner?: string;
-  /** GitHub Projects v2 board number. */
-  projectNumber?: number;
-  /** Board status→column map (Azure states / GitHub Status options). */
+  /** Board status→column map (Azure states). */
   columns?: ColumnMap;
   /**
    * Default target branch for `kodi pr create` (the branch PRs merge into), chosen
-   * from the remote's real branches during `kodi init`. Only set for the github /
-   * azure providers. `--target` on the command overrides it.
+   * from the remote's real branches during `kodi init`. Only set for the azure
+   * provider. `--target` on the command overrides it.
    */
   prTarget?: string;
   /**
@@ -103,16 +99,27 @@ export function findProjectRoot(cwd = process.cwd()): string {
 /**
  * Resolve the active board config from `.claude/kodi-dev.yaml` (searched upward
  * from cwd). Falls back to the local provider so the CLI works unconfigured.
+ *
+ * An unsupported provider throws rather than falling back: a project still set to a
+ * remote board kodi no longer drives would otherwise start writing local tickets.
  */
 export function loadBoardConfig(cwd = process.cwd()): BoardConfig {
   const path = stateFilePath(findProjectRoot(cwd));
   if (!existsSync(path)) return { ...DEFAULTS };
+  let raw: Partial<BoardConfig>;
   try {
-    const raw = parseYaml(readFileSync(path, 'utf-8')) ?? {};
-    return { ...DEFAULTS, ...raw };
+    raw = parseYaml(readFileSync(path, 'utf-8')) ?? {};
   } catch {
     return { ...DEFAULTS };
   }
+  const provider = raw.provider as string | undefined;
+  if (provider && !(PROVIDERS as readonly string[]).includes(provider)) {
+    throw new Error(
+      `provider "${provider}" is not supported: kodi drives ${PROVIDERS.join(' and ')}. ` +
+        `Run \`kodi init\` to switch this project.`,
+    );
+  }
+  return { ...DEFAULTS, ...raw };
 }
 
 /** Persist the board config to the project's `.claude/kodi-dev.yaml`. */

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import { DEFAULT_WORKTREES_DIR, findProjectRoot, loadBoardConfig } from '../config.js';
-import { startSliceGit } from '../git.js';
+import { DEFAULT_REMOTE, startAutopilotGit, startSliceGit } from '../git.js';
 import { LegacyDataError, type LegacyDataReport } from '../providers/local.js';
 import { resolveProvider } from '../providers/index.js';
 import type { TicketProvider, TicketRef } from '../providers/types.js';
@@ -83,7 +83,7 @@ async function warnUnknownDependencies(
 export function registerTicketsCommand(program: Command) {
   const tickets = program
     .command('tickets')
-    .description('Manage tickets across the active provider (local / github / azure)');
+    .description('Manage tickets across the active provider (local / azure)');
 
   tickets
     .command('create')
@@ -98,7 +98,7 @@ export function registerTicketsCommand(program: Command) {
     .option('--adr <ref>', 'ADR driver (repeatable)', collect, [])
     .option('--security <ref>', 'security driver')
     .option('--notes <text>')
-    .option('--iteration <name>', 'assign to an iteration/sprint (azure/github only)')
+    .option('--iteration <name>', 'assign to an iteration/sprint (azure only)')
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (o) => {
@@ -141,11 +141,11 @@ export function registerTicketsCommand(program: Command) {
     .option('-a, --all', 'include the Done column', false)
     .option(
       '--iteration <name>',
-      'list one iteration/sprint instead of the current one (azure/github only)',
+      'list one iteration/sprint instead of the current one (azure only)',
     )
     .option(
       '--all-iterations',
-      'disable iteration filtering — list tickets from every sprint (azure/github only)',
+      'disable iteration filtering — list tickets from every sprint (azure only)',
       false,
     )
     .option('--json', 'machine-readable output', false)
@@ -171,7 +171,7 @@ export function registerTicketsCommand(program: Command) {
 
   tickets
     .command('iterations')
-    .description('List all iterations/sprints (azure/github only)')
+    .description('List all iterations/sprints (azure only)')
     .option('--json', 'machine-readable output', false)
     .action(async (o) => {
       const its = await resolveProvider().listIterations();
@@ -215,7 +215,10 @@ export function registerTicketsCommand(program: Command) {
 
   tickets
     .command('get <key>')
-    .description('Show one ticket')
+    // `show` is the name people reach for first; aliasing it beats answering a
+    // guess with a bare `unknown command 'show'`.
+    .alias('show')
+    .description('Show one ticket (alias: show)')
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
       key = canonicalizeTicketKey(key);
@@ -250,8 +253,9 @@ export function registerTicketsCommand(program: Command) {
   tickets
     .command('start <key>')
     .description(
-      'Mark a ticket started (In progress, assigned to you on github/azure) and cut its ' +
-        'slice/kodi-<id> branch — or an isolated worktree with --worktree',
+      'Mark a ticket started (In progress, assigned to you on azure) and cut its ' +
+        'slice/kodi-<id> branch — or an isolated worktree with --worktree, or the worktree ' +
+        'an autopilot run shares with --autopilot',
     )
     .option(
       '--worktree',
@@ -263,38 +267,91 @@ export function registerTicketsCommand(program: Command) {
       'skip branch/worktree creation — use when bundling several tickets onto one ' +
         'already-cut branch (only the first `start` in the batch omits this)',
     )
+    .option(
+      '--push',
+      'also publish the branch with upstream tracking (`git push -u`) — a PR head ' +
+        'must exist on the remote before `kodi pr create` can open against it',
+      false,
+    )
+    .option('--remote <name>', 'remote --push targets', DEFAULT_REMOTE)
+    .option(
+      '--autopilot <slug>',
+      'cut or reuse one worktree on a branch named <slug>, shared by every ticket of an ' +
+        'autopilot run, instead of slice/kodi-<id> (implies --worktree)',
+    )
+    .option(
+      '--base <ref>',
+      'base a NEW branch on this ref instead of sourceBranch or the current branch',
+    )
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
       key = canonicalizeTicketKey(key);
+      for (const [flag, set] of [
+        ['--autopilot', o.autopilot],
+        ['--base', o.base],
+      ]) {
+        if (set && o.branch === false) {
+          process.stderr.write(`${flag} and --no-branch are mutually exclusive\n`);
+          process.exitCode = 1;
+          return;
+        }
+      }
       if (o.worktree && o.branch === false) {
         process.stderr.write('--worktree and --no-branch are mutually exclusive\n');
         process.exitCode = 1;
         return;
       }
-      let git: { branch: string; worktreePath?: string } | undefined;
+      if (o.push && o.branch === false) {
+        process.stderr.write('--push and --no-branch are mutually exclusive\n');
+        process.exitCode = 1;
+        return;
+      }
+      let git: { branch: string; worktreePath?: string; pushed: boolean } | undefined;
       if (o.branch !== false) {
         const cfg = loadBoardConfig(process.cwd());
-        git = startSliceGit(key, {
-          worktree: o.worktree,
+        const gitOpts = {
           worktreesDir: cfg.worktreesDir ?? DEFAULT_WORKTREES_DIR,
           root: findProjectRoot(process.cwd()),
           dryRun: !o.yes,
-          sourceBranch: cfg.sourceBranch,
-        });
+          sourceBranch: o.base ?? cfg.sourceBranch,
+          push: o.push,
+          remote: o.remote,
+        };
+        git = o.autopilot
+          ? startAutopilotGit(o.autopilot, {
+              ...gitOpts,
+              reserved: [o.base, cfg.sourceBranch, cfg.prTarget],
+            })
+          : startSliceGit(key, { ...gitOpts, worktree: o.worktree });
       }
       const t = await resolveProvider(process.cwd(), { yes: o.yes }).start(key, {
         branch: git?.branch,
       });
-      out({ ...t, branch: git?.branch, worktreePath: git?.worktreePath }, o.json, () =>
-        [
-          `${t.key} → ${t.status}`,
-          git
-            ? git.worktreePath
-              ? `worktree: ${git.worktreePath}`
-              : `branch: ${git.branch}`
-            : 'branch: skipped (--no-branch)',
-        ].join('\n'),
+      out(
+        {
+          ...t,
+          branch: git?.branch,
+          worktreePath: git?.worktreePath,
+          ...(git ? { pushed: git.pushed } : {}),
+        },
+        o.json,
+        () =>
+          [
+            `${t.key} → ${t.status}`,
+            git
+              ? git.worktreePath
+                ? `worktree: ${git.worktreePath}`
+                : `branch: ${git.branch}`
+              : 'branch: skipped (--no-branch)',
+            // A branch that exists only locally cannot be a PR head — say so at
+            // `start`, rather than letting `pr create` be the one to discover it.
+            git && !git.pushed
+              ? `(local only — push it before \`kodi pr create\`, or re-run with --push)`
+              : undefined,
+          ]
+            .filter(Boolean)
+            .join('\n'),
       );
     });
 
@@ -327,7 +384,7 @@ export function registerTicketsCommand(program: Command) {
     .option('--ac <criterion>', 'replace acceptance criteria (repeatable)', collect, [])
     .option('--dep <key>', 'replace dependencies (repeatable)', collect, [])
     .option('--pr <ref>', 'link a PR')
-    .option('--iteration <name>', 'assign to an iteration/sprint (azure/github only)')
+    .option('--iteration <name>', 'assign to an iteration/sprint (azure only)')
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
@@ -357,7 +414,9 @@ export function registerTicketsCommand(program: Command) {
 
   tickets
     .command('link-pr <key> <pr>')
-    .description('Bind a pull request to a ticket')
+    .description(
+      "Record a pull request on the ticket — writes a **PR:** line into the ticket's body",
+    )
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, pr, o) => {
@@ -398,16 +457,20 @@ export function registerTicketsCommand(program: Command) {
 
   tickets
     .command('hand-off <key>')
-    .description('End of slice: move to To review and optionally link the PR')
-    .option('--pr <ref>', 'link the PR at hand-off')
+    .description(
+      'End of slice: move to To review and optionally record the PR. Idempotent — ' +
+        're-running on a ticket already in To review just (re-)writes the PR link',
+    )
+    .option('--pr <ref>', 'record the PR at hand-off (same bookkeeping as link-pr)')
     .option('--yes', 'execute remote mutations (default: dry-run)', false)
     .option('--json', 'machine-readable output', false)
     .action(async (key, o) => {
       key = canonicalizeTicketKey(key);
       const provider = resolveProvider(process.cwd(), { yes: o.yes });
-      if (o.pr) await provider.amend(key, { prUrl: o.pr });
+      const ref: string | undefined = o.pr;
+      if (ref) await provider.amend(key, { prUrl: ref });
       const t = await provider.setStatus(key, 'To review');
-      out(t, o.json, () => `${t.key} → ${t.status}${o.pr ? ` (PR ${o.pr})` : ''}`);
+      out(t, o.json, () => `${t.key} → ${t.status}${ref ? ` (PR ${ref})` : ''}`);
     });
 
   return tickets;

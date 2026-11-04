@@ -27,6 +27,7 @@ Three laws hold across every command:
 | `/kodi.clarify <prd>`      | main-loop, five questions    | `plan-writer`          | answers in `## Clarifications`, ambiguous sentences replaced               |
 | `/kodi.tasks <prd>`        | main-loop approves the table | `tasks-writer`         | `docs/plan/NNNN-<slug>.tasks.md`, one ticket per user story on the board   |
 | `/kodi.build <ticket>`     | —                            | `build-orchestrator`   | `ui-designer` → engineers with their own QA → PR in To Review              |
+| `/kodi.autopilot`                  | —                    | `build-orchestrator`   | a range of tickets, unattended: one PR and a report in `docs/autopilot/` |
 | `/kodi.security`, `/kodi.refactor` | —                    | main-loop              | audit reports / a tidied target                                            |
 
 ---

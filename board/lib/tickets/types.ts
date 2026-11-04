@@ -4,7 +4,7 @@
 //  - PRD 0001 §7 "Corrected data contract" — the ONLY ticket fields the board
 //    may read/expose (allow-list, SR-5).
 //  - data-model §1/§3 — the four canonical statuses (Alternative B) and their
-//    fixed order. These mirror the columns a remote (github/azure) board is
+//    fixed order. These mirror the columns a remote (azure) board is
 //    configured with (to-do/pending, in progress, in review, done) — there is
 //    no "Blocked" status.
 //
