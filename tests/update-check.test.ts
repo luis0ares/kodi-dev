@@ -4,6 +4,9 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { checkForUpdate, forceUpdate, isNewerVersion } from '../src/update-check.js';
 
+// A call that omits `run` reaches defaultRun, which would reinstall the real global package.
+vi.mock('cross-spawn', () => ({ default: { sync: vi.fn(() => ({ status: 0 })) } }));
+
 describe('isNewerVersion', () => {
   it('compares major/minor/patch numerically', () => {
     expect(isNewerVersion('1.4.0', '1.3.2')).toBe(true);
